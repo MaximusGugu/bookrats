@@ -158,7 +158,8 @@ service cloud.firestore {
         }
         allow read: if member(cid);
         allow create: if signed() && existsAfter(/databases/$(database)/documents/bookratsClubs/$(cid)/members/$(request.auth.uid)) && ownActivity() && touched(cid);
-        allow update: if member(cid) && touched(cid) && (reactionOnly() || (resource.data.userId==request.auth.uid && ownActivity() && request.resource.data.likes==resource.data.likes));
+        allow update: if member(cid) && (reactionOnly()
+          || (touched(cid) && resource.data.userId==request.auth.uid && ownActivity() && request.resource.data.likes==resource.data.likes));
         allow delete: if member(cid) && (resource.data.userId==request.auth.uid || owner(cid)) && touched(cid);
       }
     }

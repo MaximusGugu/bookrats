@@ -1,4 +1,4 @@
-const {initializeTestEnvironment,assertFails}=require('@firebase/rules-unit-testing');
+const {initializeTestEnvironment,assertFails,assertSucceeds}=require('@firebase/rules-unit-testing');
 const {doc,getDoc,getDocs,collection,writeBatch,setDoc,updateDoc,serverTimestamp,Timestamp,increment}=require('firebase/firestore');
 const fs=require('node:fs'),assert=require('node:assert/strict');
 const empty=uid=>({version:1,currentUser:uid,activeClub:'',users:[{id:uid,name:uid,goal:4,color:'#c8dfe8',photo:''}],books:[],readings:[],clubs:[],activities:[]});
@@ -37,6 +37,12 @@ const empty=uid=>({version:1,currentUser:uid,activeClub:'',users:[{id:uid,name:u
   alice=await a.read();assert.equal(alice.readings.find(r=>r.id==='r3').page,5);
   bob=await b.read();const digitalReading=bob.readings.find(r=>r.id==='r3');Object.assign(bob.books.find(b=>b.id==='b3'),{format:'digital',pages:100});Object.assign(digitalReading,{page:40,initialPage:0,logs:[{id:'digital-log',date:'2026-10-09',from:0,to:40,delta:40}]});bob.activities.push({id:'digital-event',userId:'bob',readingId:'r3',logId:'digital-log',clubs:['c1'],date:'2026-10-09',text:'Digital progress',likes:[]});await b.save(bob);
   alice=await a.read();assert.equal(alice.books.find(b=>b.id==='b3').format,'digital');assert.equal(alice.readings.find(r=>r.id==='r3').logs.length,1);
+  await assertSucceeds(updateDoc(doc(dbA,'bookratsClubs/c1/activities/digital-event'),{likes:['alice']}));
+  bob=await b.read();assert.deepEqual(bob.activities.find(event=>event.id==='digital-event').likes,['alice']);
+  bob.activities.find(event=>event.id==='digital-event').likes.push('bob');await b.save(bob);
+  alice=await a.read();assert.deepEqual(alice.activities.find(event=>event.id==='digital-event').likes,['alice','bob']);
+  alice.activities.find(event=>event.id==='digital-event').likes=alice.activities.find(event=>event.id==='digital-event').likes.filter(id=>id!=='alice');await a.save(alice);
+  bob=await b.read();assert.deepEqual(bob.activities.find(event=>event.id==='digital-event').likes,['bob']);
   bob=await b.read();Object.assign(bob.readings.find(r=>r.id==='r3'),{page:0,logs:[]});bob.activities=bob.activities.filter(a=>a.id!=='digital-event');await b.save(bob);
   alice=await a.read();assert.equal(alice.readings.find(r=>r.id==='r3').logs.length,0);assert.equal(alice.activities.some(a=>a.id==='digital-event'),false);
   const stale=store(dbB,'bob');let staleState=await stale.load(()=>{throw Error('Should not initialize');});
