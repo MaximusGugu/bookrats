@@ -29,3 +29,7 @@
 [data-theme="dark"] #toast{background:#d2e1c6;color:#1c2b20}
 [data-theme="dark"] .footer-logo-light{display:none}
 [data-theme="dark"] .footer-logo-dark{display:block}
+[data-theme="dark"] .menu-profile:hover,[data-theme="dark"] .meeting-open:hover{background:#2b362d}
+[data-theme="dark"] .vote.voted{background:#354632;border-color:#637c50}
+[data-theme="dark"] .vote.voted small{color:#ddefb9}
+[data-theme="dark"] .calendar .day.done{background:#bdd5a7;color:#17251b;border-color:#bdd5a7}

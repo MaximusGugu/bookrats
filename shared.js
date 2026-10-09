@@ -4,7 +4,11 @@ const copy = value => JSON.parse(JSON.stringify(value));
 const same = (a,b) => JSON.stringify(a)===JSON.stringify(b);
 const conflict = () => Object.assign(Error('O clube mudou em outro dispositivo. Atualize os dados e tente novamente.'),{code:'bookrats/conflict'});
 const fields = ['id','name','description','owner','target','proposals','votes','meetings','comments'];
-const metadata = c => Object.fromEntries(fields.map(k=>[k,c[k] ?? ({proposals:[],votes:{},meetings:[],comments:[],description:''}[k] ?? '')]));
+const metadata = c => {
+  const result=Object.fromEntries(fields.map(k=>[k,c[k] ?? ({proposals:[],votes:{},meetings:[],comments:[],description:''}[k] ?? '')]));
+  result.meetings=result.meetings.map(({going,...meeting})=>meeting);
+  return result;
+};
 const profile = (s,uid) => copy(s.users.find(u=>u.id===uid));
 function shares(s,cid,uid) {
   return new Map(s.readings.filter(r=>r.userId===uid&&r.clubs.includes(cid)).map(r=>[r.id,{
@@ -42,16 +46,18 @@ export function createSharedStore(db,uid,privateStore){
         for(let attempt=0;attempt<4;attempt++){
           const before=await getDocFromServer(clubRef(cid));
           if(!before.exists())break;
-          const [members,rs,as]=await Promise.all(['members','readings','activities'].map(k=>getDocsFromServer(collection(clubRef(cid),k))));
+          const [members,rs,as,rsvps]=await Promise.all(['members','readings','activities','rsvps'].map(k=>getDocsFromServer(collection(clubRef(cid),k))));
           const after=await getDocFromServer(clubRef(cid));
           if(before.data().revision!==after.data()?.revision)continue;
-          shared={club:after.data(),members:members.docs.map(d=>d.data()),readings:rs.docs.map(d=>d.data()),activities:as.docs.map(d=>d.data())};break;
+          shared={club:after.data(),members:members.docs.map(d=>d.data()),readings:rs.docs.map(d=>d.data()),activities:as.docs.map(d=>d.data()),rsvps:rsvps.docs.map(d=>d.data())};break;
         }
         if(!shared)throw conflict();
         const memberIds=shared.members.map(m=>m.userId);
         if(!memberIds.includes(uid))continue;
         revisions.set(cid,shared.club.revision);
-        result.clubs.push({...metadata(shared.club),members:memberIds,shared:true});
+        const clubData=metadata(shared.club);
+        clubData.meetings=clubData.meetings.map(meeting=>({...meeting,going:shared.rsvps.filter(rsvp=>rsvp.meetingId===meeting.id&&memberIds.includes(rsvp.userId)).map(rsvp=>rsvp.userId)}));
+        result.clubs.push({...clubData,members:memberIds,shared:true});
         for(const m of shared.members)if(m.userId!==uid)people.set(m.userId,m.profile);
         for(const row of shared.readings){
           if(row.userId===uid||!memberIds.includes(row.userId))continue;
@@ -143,6 +149,16 @@ export function createSharedStore(db,uid,privateStore){
       return {token,clubId:cid,name:current.data().name,expiresAt:expiresAt.toMillis()};
     },
     async revokeInvite(cid){active();await runTransaction(db,async tx=>{const c=await tx.get(clubRef(cid));if(c.data()?.owner!==uid)throw Error('Sem permissão.');tx.update(clubRef(cid),{inviteToken:'',revision:c.data().revision+1,updatedAt:serverTimestamp()});});},
+    async setRsvp(cid,meetingId,going){
+      active();if(!/^[a-zA-Z0-9_-]{1,128}$/.test(meetingId))throw Error('Encontro inválido.');
+      const ref=doc(clubRef(cid),'rsvps',meetingId+'_'+uid);
+      await runTransaction(db,async tx=>{
+        const c=await tx.get(clubRef(cid));if(!c.exists())throw Error('Clube não encontrado.');
+        if(going)tx.set(ref,{meetingId,userId:uid,updatedAt:serverTimestamp()});else tx.delete(ref);
+        tx.update(clubRef(cid),{revision:c.data().revision+1,updatedAt:serverTimestamp()});
+        revisions.set(cid,c.data().revision+1);
+      });
+    },
     previewInvite,
     async acceptInvite(token){
       active();const info=await previewInvite(token),cid=info.clubId;

@@ -88,3 +88,4 @@ dialog .close{min-width:40px;min-height:40px}
 @media(min-width:800px){.topbar{padding:32px 40px 14px}.content{padding:0 40px 48px}.shelf{grid-template-columns:repeat(4,minmax(0,1fr));gap:28px 34px}.club-tabs{max-width:540px;margin:0 auto}.club-panel{max-width:680px;margin:0 auto}.club-members{margin-bottom:22px}}
 @media(prefers-reduced-motion:reduce){button,a,.cover{transition:none}}
 .brand-footer{min-height:78px;padding:20px 18px 24px}.footer-logo{width:112px}
+@media(max-width:539px){.meeting-open{align-items:flex-start;flex-direction:column}.meeting-attendees{justify-content:flex-start;min-width:0}.meeting-attendees small{text-align:left}.meeting-delete{align-self:flex-start;margin-top:10px}}

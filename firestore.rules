@@ -162,6 +162,19 @@ service cloud.firestore {
           || (touched(cid) && resource.data.userId==request.auth.uid && ownActivity() && request.resource.data.likes==resource.data.likes));
         allow delete: if member(cid) && (resource.data.userId==request.auth.uid || owner(cid)) && touched(cid);
       }
+      match /rsvps/{rsvpId} {
+        function validRsvp() {
+          let d=request.resource.data;
+          return d.keys().hasOnly(['meetingId','userId','updatedAt'])
+            && d.meetingId is string && d.meetingId.matches('[a-zA-Z0-9_-]{1,128}')
+            && d.userId==request.auth.uid
+            && rsvpId==d.meetingId+'_'+request.auth.uid
+            && d.updatedAt==request.time;
+        }
+        allow read: if member(cid);
+        allow create, update: if member(cid) && validRsvp();
+        allow delete: if member(cid) && resource.data.userId==request.auth.uid;
+      }
     }
   }
 }

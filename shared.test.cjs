@@ -29,6 +29,11 @@ const empty=uid=>({version:1,currentUser:uid,activeClub:'',users:[{id:uid,name:u
   let bob=await b.read();assert.equal(bob.clubs[0].members.length,2);
   assert.equal(bob.books.some(x=>x.title==='Privado'),false);
   assert.equal(bob.readings.length,1);assert.equal(bob.readings[0].logs[0].note,undefined);
+  bob.clubs[0].meetings.push({id:'meeting1',userId:'bob',title:'Café e livros',date:'2026-10-20',time:'19:00',place:'Biblioteca'});await b.save(bob);
+  await b.setRsvp('c1','meeting1',true);let aliceMeeting=(await a.read()).clubs[0].meetings[0];assert.deepEqual(aliceMeeting.going,['bob']);
+  await a.setRsvp('c1','meeting1',true);let bobMeeting=(await b.read()).clubs[0].meetings[0];assert.deepEqual(new Set(bobMeeting.going),new Set(['alice','bob']));
+  await b.setRsvp('c1','meeting1',false);aliceMeeting=(await a.read()).clubs[0].meetings[0];assert.deepEqual(aliceMeeting.going,['alice']);
+  await assertFails(setDoc(doc(dbE,'bookratsClubs/c1/rsvps/meeting1_eve'),{meetingId:'meeting1',userId:'eve',updatedAt:serverTimestamp()}));
   await assertFails(getDoc(doc(dbB,'bookratsAccounts/alice/items/books_b2')));
   await assertFails(updateDoc(doc(dbB,'bookratsClubs/c1'),{name:'Hijacked',revision:increment(1),updatedAt:serverTimestamp()}));
   bob.clubs[0].comments.push({id:'comment1',userId:'bob',text:'Olá!',spoiler:false});await b.save(bob);
