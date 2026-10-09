@@ -37,22 +37,35 @@ const assert = require('node:assert/strict');
 
     await page.evaluate(()=>navigate('clube'));
     await page.getByRole('tab',{name:'Clube'}).click();
+    assert.equal(await page.locator('.club-panel>.subsection').first().evaluate(el=>getComputedStyle(el).borderTopWidth),'0px','no duplicate separator before club rhythm');
     assert.equal(await page.locator('.calendar .day.done').count(),1,'one reading day highlighted');
     const opacity=await page.evaluate(()=>({done:getComputedStyle(document.querySelector('.day.done')).opacity,empty:getComputedStyle(document.querySelector('.day:not(.done)')).opacity}));
     assert.ok(Number(opacity.done)>Number(opacity.empty),'days without reading have lower opacity');
     assert.equal(await page.locator('.vote.voted').count(),1,'own vote highlighted');
     assert.equal(await page.locator('.vote').last().evaluate(el=>getComputedStyle(el).borderBottomWidth),'0px','last vote has no duplicate separator');
     assert.equal(await page.locator('.meeting-row').last().evaluate(el=>getComputedStyle(el).borderBottomWidth),'0px','last meeting has no duplicate separator');
+    assert.equal(await page.locator('.meeting-open').evaluate(el=>getComputedStyle(el).paddingLeft),'12px','meeting cards have aligned left padding');
+    assert.equal(await page.locator('.meeting-delete').count(),0,'delete action is removed from meeting row');
     assert.equal(await page.locator('.meeting-attendees .avatar').count(),1,'dashboard shows attendees');
 
     await page.locator('[data-action=meeting-details]').click();
     await page.locator('.meeting-detail').getByText('Biblioteca central',{exact:false}).waitFor();
+    assert.equal(await page.locator('.meeting-admin-actions button').count(),2,'administrator actions are inside details modal');
     await page.getByRole('button',{name:'Eu vou',exact:true}).click();
     await page.waitForFunction(()=>club().meetings[0].going.includes('you')&&document.querySelectorAll('.meeting-confirmed .avatar').length===2);
     assert.equal(await page.locator('.meeting-confirmed .avatar').count(),2,'RSVP modal shows attendees');
     await page.getByRole('button',{name:'Não vou',exact:true}).click();
     await page.waitForFunction(()=>!club().meetings[0].going.includes('you')&&document.querySelectorAll('.meeting-confirmed .avatar').length===1);
+    await page.getByRole('button',{name:'Editar',exact:true}).click();
+    await page.locator('input[name=title]').fill('Encontro atualizado');
+    await page.getByRole('button',{name:'Salvar alterações'}).click();
+    await page.getByText('Encontro atualizado',{exact:true}).waitFor();
+    await page.locator('[data-action=meeting-details]').click();
+    page.once('dialog',dialog=>dialog.accept());
+    await page.getByRole('button',{name:'Excluir',exact:true}).click();
+    await page.waitForFunction(()=>club().meetings.length===0&&!document.querySelector('.meeting-row'));
+    assert.equal(await page.locator('.meeting-row').count(),0,'administrator can delete meeting from modal');
     assert.deepEqual(errors,[]);
-    console.log('PASS: profile menu, bookmark icon, reading week, vote highlight, separators and meeting RSVP.');
+    console.log('PASS: profile menu, bookmark icon, reading week, vote highlight, separators, meeting RSVP and admin actions.');
   } finally { await browser.close(); }
 })().catch(error=>{console.error(error);process.exitCode=1;});
