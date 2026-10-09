@@ -35,6 +35,10 @@ const empty=uid=>({version:1,currentUser:uid,activeClub:'',users:[{id:uid,name:u
   let alice=await a.read();assert.equal(alice.clubs[0].comments[0].text,'Olá!');
   bob=await b.read();bob.books.push({id:'b3',title:'Livro do Bob',author:'Autor',pages:120,cover:''});bob.readings.push({id:'r3',userId:'bob',bookId:'b3',page:5,status:'reading',clubs:['c1'],logs:[]});await b.save(bob);
   alice=await a.read();assert.equal(alice.readings.find(r=>r.id==='r3').page,5);
+  bob=await b.read();const digitalReading=bob.readings.find(r=>r.id==='r3');Object.assign(bob.books.find(b=>b.id==='b3'),{format:'digital',pages:100});Object.assign(digitalReading,{page:40,initialPage:0,logs:[{id:'digital-log',date:'2026-10-09',from:0,to:40,delta:40}]});bob.activities.push({id:'digital-event',userId:'bob',readingId:'r3',logId:'digital-log',clubs:['c1'],date:'2026-10-09',text:'Digital progress',likes:[]});await b.save(bob);
+  alice=await a.read();assert.equal(alice.books.find(b=>b.id==='b3').format,'digital');assert.equal(alice.readings.find(r=>r.id==='r3').logs.length,1);
+  bob=await b.read();Object.assign(bob.readings.find(r=>r.id==='r3'),{page:0,logs:[]});bob.activities=bob.activities.filter(a=>a.id!=='digital-event');await b.save(bob);
+  alice=await a.read();assert.equal(alice.readings.find(r=>r.id==='r3').logs.length,0);assert.equal(alice.activities.some(a=>a.id==='digital-event'),false);
   const stale=store(dbB,'bob');let staleState=await stale.load(()=>{throw Error('Should not initialize');});
   bob=await b.read();bob.clubs[0].comments.push({id:'comment2',userId:'bob',text:'Outra mensagem',spoiler:false});await b.save(bob);
   staleState.clubs[0].comments.push({id:'comment3',userId:'bob',text:'Mensagem antiga',spoiler:false});await assert.rejects(()=>stale.save(staleState),e=>e.code==='bookrats/conflict');
