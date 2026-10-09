@@ -50,3 +50,7 @@ GravaÃ§Ãµes privadas suportam atÃ© 450 registros alterados e 8 MB por operaÃ§Ã£o
 - `npm run build`: gera o bundle estÃ¡tico.
 
 ReferÃªncias: https://firebase.google.com/docs/firestore/manage-data/transactions e https://firebase.google.com/docs/firestore/security/rules-conditions.
+
+### Sessão e cache do navegador
+
+A sessão Google usa persistência do Firebase. Após o Firebase identificar a conta, uma cópia dos dados confirmados é exibida a partir do IndexedDB enquanto o Firestore sincroniza. O cache é separado por usuário e removido ao sair ou trocar de conta. Sem conexão, a cópia fica disponível para consulta; alterações exigem sincronização. Navegação privada ou limpeza dos dados do site podem remover a sessão e o cache.

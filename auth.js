@@ -3,18 +3,15 @@ import { getFirestore } from 'firebase/firestore';
 import { createCloudStore } from './cloud.js';
 export { cloudError } from './cloud.js';
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, setPersistence, browserLocalPersistence, browserSessionPersistence, inMemoryPersistence, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { initializeAuth, indexedDBLocalPersistence, browserPopupRedirectResolver, browserLocalPersistence, browserSessionPersistence, inMemoryPersistence, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 let auth;
 let unsubscribe;
 export async function startAuth(config, onChange) {
-  auth = getAuth(getApps()[0] || initializeApp(config));
+  auth ||= initializeAuth(getApps()[0] || initializeApp(config), {
+    persistence: [indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence, inMemoryPersistence],
+    popupRedirectResolver: browserPopupRedirectResolver
+  });
   auth.languageCode = 'pt-BR';
-  let persistenceSet = false;
-  for (const persistence of [browserLocalPersistence, browserSessionPersistence, inMemoryPersistence]) {
-    try { await setPersistence(auth, persistence); persistenceSet = true; break; }
-    catch (error) { if (persistence === inMemoryPersistence) throw error; }
-  }
-  if (!persistenceSet) throw Error('Não foi possível configurar a sessão.');
   unsubscribe?.();
   unsubscribe = onAuthStateChanged(auth, onChange);
   await auth.authStateReady();
@@ -44,3 +41,5 @@ export function accountStore(uid) {
   const db=getFirestore(auth.app);
   return createSharedStore(db,uid,createCloudStore(db,uid));
 }
+
+export { loadCachedState, saveCachedState, removeCachedState } from './view-cache.js';

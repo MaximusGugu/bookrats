@@ -30,6 +30,7 @@ async function save() {
   try {
     await store.save(snapshot);
     if(store!==cloudStore)return false;
+    authModule.saveCachedState?.(sessionUser.uid,snapshot);
     setSyncStatus('Salvo no Firestore');
     return true;
   } catch(error) {
@@ -49,6 +50,12 @@ async function loadCloud(account) {
   try{store=authModule.accountStore(account.uid);}catch(error){cloudReady=false;dataLoading=false;dataMessage=cloudMessage(error);render();return;}
   cloudStore=store;
   cloudReady=false;dataLoading=true;dataMessage='Carregando seus livros e clubesâ€¦';render();
+  const cachedView=authModule.loadCachedState?.(account.uid).then(cached=>{
+    if(store!==cloudStore||cloudReady||!dataLoading||state||!cached)return;
+    try{validateBackup(cached);if(cached.currentUser!==account.uid)return;state=cached;setSyncStatus('Dados salvos neste navegador · Atualizando…');render();}catch{}
+  });
+  await Promise.race([cachedView,new Promise(resolve=>setTimeout(resolve,500))]);
+  if(store!==cloudStore)return;
   try {
     const loaded=await store.load(()=>{
       // Only inspect legacy storage when no cloud account exists. Never replace cloud data.
@@ -60,10 +67,10 @@ async function loadCloud(account) {
       return {state:initial,migrated:!!saved};
     });
     if(store!==cloudStore)return;
-    validateBackup(loaded);state=loaded;cloudReady=true;remotePending=false;
+    validateBackup(loaded);state=loaded;authModule.saveCachedState?.(account.uid,loaded);cloudReady=true;remotePending=false;
     setSyncStatus('Sincronizado com o Firestore');
     store.watch(()=>{remotePending=true;refreshCloud();},error=>{if(store===cloudStore){setSyncStatus(cloudMessage(error));}});
-  } catch(error){if(store===cloudStore){cloudReady=false;dataMessage=cloudMessage(error);}}
+  } catch(error){if(store===cloudStore){cloudReady=false;dataMessage=cloudMessage(error);setSyncStatus('Consulta do cache · '+dataMessage);if(['permission-denied','unauthenticated'].includes(error.code)){state=null;authModule.removeCachedState?.(account.uid);}}}
   finally{if(store===cloudStore){dataLoading=false;render();if(cloudReady&&pendingInvite)openPendingInvite();}}
 }
 async function refreshCloud(force=false) {
@@ -75,7 +82,7 @@ async function refreshCloud(force=false) {
     const loaded=await store.read();
     if(store!==cloudStore)return;
     if(!loaded)throw Error('Os dados desta conta nÃ£o estÃ£o disponÃ­veis no Firestore.');
-    validateBackup(loaded);state=loaded;remotePending=false;setSyncStatus('Sincronizado com o Firestore');render();
+    validateBackup(loaded);state=loaded;authModule.saveCachedState?.(sessionUser.uid,loaded);remotePending=false;setSyncStatus('Sincronizado com o Firestore');render();
   }catch(error){if(store===cloudStore){setSyncStatus(cloudMessage(error));toast(cloudMessage(error));}}
   finally{if(store===cloudStore)dataLoading=false;}
 }
@@ -143,7 +150,7 @@ function clubPanel(c) {
 }
 function render(){
   if (!sessionUser) return renderLogin();
-  if(!cloudReady)return renderCloudLoading();
+  if(!state)return renderCloudLoading();
   const filtersOpen = $('.shelf-filters')?.open;
   if(!club())state.activeClub=memberships()[0]?.id||'';
   const c=club();
@@ -251,12 +258,22 @@ document.addEventListener('click',async e=>{const target=e.target.closest('[data
   if(a==='sign-out')return googleLogout();
   if(!sessionUser)return;
   if(a==='retry-cloud')return loadCloud(sessionUser);
-  if(a==='refresh-cloud')return refreshCloud(true);
+  if(a==='refresh-cloud')return cloudReady?refreshCloud(true):(!dataLoading&&loadCloud(sessionUser));
   if(a==='dismiss-invite'){clearInvite();$('#modal').close();return;}
   if(a==='copy-invite'){
     const input=$('#inviteLink');try{await navigator.clipboard.writeText(input.value);toast('Link copiado.');}catch{input.focus();input.select();toast('Selecione e copie o link.');}return;
   }
-  if(!cloudReady||dataSaving||dataLoading)return;
+  if(!cloudReady||dataSaving||dataLoading){
+    if(!state)return;
+    if(a==='close')return $('#modal').close();
+    if(a==='app-menu')return appMenu();
+    if(a==='menu-route'){$('#modal').close();return navigate(id);}
+    if(a==='profile')return navigate('perfil');
+    if(a==='theme')return toggleTheme();
+    if(a==='filter'){filter=id;return render();}
+    if(a==='book')return details(id);
+    return toast('Aguarde a sincronização para alterar seus dados.');
+  }
   const before=JSON.stringify(state), originalStore=cloudStore;
   try {
   const c=club();
@@ -323,7 +340,7 @@ $('#modalForm').addEventListener('submit',async e=>{
   finally{button.disabled=false;if(originalStore===cloudStore){dataSaving=false;refreshCloud();}}
 });
 $('#modal').addEventListener('close',()=>refreshCloud());
-window.addEventListener('online',()=>{if(cloudReady)refreshCloud(true);});
+window.addEventListener('online',()=>{if(sessionUser){if(cloudReady)refreshCloud(true);else if(!dataLoading)loadCloud(sessionUser);}});
 
 document.addEventListener('input',e=>{if(e.target.id==='search'){query=e.target.value;const rs=view==='estante'?state.readings.filter(r=>r.userId===user().id):state.readings.filter(r=>r.clubs.includes(club().id)&&club().members.includes(r.userId));$('.shelf').innerHTML=shelf(rs);}});
 $('#fileInput').addEventListener('change',async e=>{
@@ -368,6 +385,7 @@ async function initializeLogin() {
     await authModule.startAuth(config, account=>{
       cloudStore?.stop();cloudStore=null;cloudReady=false;dataSaving=false;dataLoading=false;remotePending=false;
       $('#modal').close();submit=null;
+      if(sessionUser&&sessionUser.uid!==account?.uid)authModule.removeCachedState?.(sessionUser.uid);
       sessionUser=account;state=null;
       if(account){KEY='bookrats.account.v1:'+account.uid;loadCloud(account);}
       else {authMessage='Entre para acessar sua conta.';render();}
