@@ -1,0 +1,19 @@
+{
+  "name": "bookrats",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node smoke.cjs && node auth-order.test.cjs",
+    "build": "esbuild auth.js --bundle --format=iife --global-name=BookratsAuth --minify --outfile=auth.bundle.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.0",
+    "esbuild": "^0.28.2"
+  },
+  "dependencies": {
+    "firebase": "^12.7.0"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.13.6"
+  }
+}
