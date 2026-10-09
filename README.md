@@ -1,27 +1,45 @@
 # Bookrats
 
-Aplicação estática com acesso obrigatório por Google, inclusive no localhost.
+Aplicação estática com login obrigatório por Google e dados no Cloud Firestore.
 
 ## Executar
 
-Abra `index.html` pelo Live Server em **http://localhost:5500** (ou a porta configurada). Não abra por `file://`. O SDK Firebase já está incluído em `auth.bundle.js`, então o Live Server não precisa de build nem carregar módulos de uma CDN.
+Abra `index.html` pelo Live Server em **http://localhost:5500** (ou a porta configurada). Não use `file://`. O SDK está incluído em `auth.bundle.js`.
 
-Para alterar a integração: `npm ci`, edite `auth.js` e execute `npm run build`. Publique também o bundle gerado. A configuração pública do aplicativo está em `firebase-config.js`, projeto `bookrats-ea53d`. Analytics não é inicializado.
+Para alterar o código de autenticação/Firestore: `npm ci`, edite `auth.js` ou `cloud.js` e execute `npm run build`. Publique também o bundle gerado. O projeto é `bookrats-ea53d`; a configuração web pública está em `firebase-config.js`. Não há inicialização do Analytics.
 
-O provedor Google precisa estar habilitado no Firebase Authentication. A lista de domínios autorizados consultada inclui `localhost` e `maximusgugu.github.io`; para usar `127.0.0.1`, adicione-o em Authentication > Settings > Authorized domains. Permita pop-ups para abrir a conta Google.
+## Ativar Firestore
 
-O login usa a sessão do Firebase. Se a persistência local estiver bloqueada, tenta persistência da aba e depois memória (nesse caso, uma recarga exige novo login). Uma falha de inicialização mostra a causa e libera o botão para tentar novamente. Não existe modo visitante, seletor de perfis ou usuário demonstrativo no aplicativo.
+1. No Firebase Console, selecione **bookrats-ea53d → Firestore Database → Criar banco**. Use o banco **(default)** e modo de produção, escolhendo a região apropriada.
+2. Em **Firestore Database → Regras**, substitua o conteúdo pelo arquivo **firestore.rules** e clique **Publicar**. Essas regras se destinam ao projeto exclusivo do Bookrats.
+3. Recarregue o app e entre com Google. Ele carregará seus dados ou migrará os dados da conta que estão neste navegador.
 
-Referência: https://firebase.google.com/docs/auth/web/google-signin
+Alternativa por CLI autenticada: `npx firebase deploy --only firestore --project bookrats-ea53d`. O arquivo de índices desativa a indexação de campos de conteúdo; as consultas usadas não exigem índices compostos.
 
-## Livros e dados
+## Dados e sincronização
 
-As estantes mostram primeiro os livros alterados mais recentemente: cadastro, edição, progresso, status e compartilhamento atualizam `updatedAt`. Datas históricas de leitura não impedem uma atualização recente de ir para o topo. A ordenação é preservada em recargas e backups.
+Cada conta tem seu espaço em `bookratsAccounts/{uid}`. Metadados e revisão ficam no documento da conta; cada livro, leitura, clube, perfil e atividade ocupa um documento próprio na subcoleção `items`. As regras permitem leitura e escrita apenas ao UID dono da conta. Todos os caminhos não declarados ficam bloqueados.
 
-Os livros ainda ficam armazenados neste navegador, separados por UID autenticado (`bookrats.account.v1:<uid>`). **Esta versão não sincroniza dados entre dispositivos e não tem banco remoto.** O login não criptografa os dados do navegador. Uma futura API/banco deve validar tokens e aplicar autorização no servidor. Nunca conectar ao projeto/documento do Entrelinhas.
+**Esta etapa sincroniza os dados da mesma conta entre dispositivos. Clubes ainda são privados à conta; convites e colaboração entre contas não estão implementados.**
 
-A conta nova começa vazia. Backups só podem ser restaurados na mesma conta. Dados antigos de demonstração não são carregados nem apagados. Convites locais e troca de perfis foram removidos; compartilhamento real entre contas exige um banco remoto.
+O Firestore é a fonte dos dados. O app só confirma gravações após o servidor responder e mantém o formulário aberto quando a gravação falha. Operações são transacionais: ou todos os registros são gravados, ou nenhum. Uma revisão impede que uma aba desatualizada sobrescreva outra silenciosamente; feche o formulário e atualize para refazer a alteração. O listener atualiza a interface ao detectar uma nova revisão, sem substituir formulários em edição.
+
+No primeiro acesso, a chave anterior `bookrats.account.v1:<uid>` é importada somente se a conta ainda não existir no Firestore. A importação é atômica, mantém os IDs e não apaga a cópia local. Se já há dados na nuvem, eles prevalecem e o armazenamento antigo não é lido. Nenhuma nova gravação de livros/clubes vai para localStorage. O tema e a persistência de autenticação continuam locais.
+
+Backups JSON continuam disponíveis e só podem ser restaurados na mesma conta. Restaurar substitui os dados no Firestore e afeta todos os dispositivos dessa conta. Cada operação suporta até 450 registros alterados e 8 MB de conteúdo; cada registro deve ter menos de 900 KB. Novas capas enviadas são limitadas a 600 KB. Uma importação acima do limite é recusada antes de gravar; use URLs para capas ou um backup menor.
+
+As estantes mantêm a ordem da alteração mais recente, incluindo edições, progresso e status.
+
+## Autenticação
+
+Habilite Google em Firebase Authentication. `localhost` e `maximusgugu.github.io` estavam autorizados no projeto na última verificação. Adicione `127.0.0.1` separadamente caso use esse endereço. Permita pop-ups. Falhas mostram uma mensagem e permitem tentar novamente.
+
+Nunca conectar ao projeto/documento do Entrelinhas. O projeto Bookrats tem suas próprias regras e coleções.
 
 ## Testes
 
-Com Node.js e Microsoft Edge instalados: `npm ci` e `npm test`. Os testes cobrem livros, ranking, layout, ordenação, recuperação após falha de inicialização, cancelamento, sessão, saída, bloqueio de telas sem login e isolamento de contas. A autenticação é simulada na suíte; o SDK real e a abertura da página Google foram verificados separadamente em localhost, inclusive com a CDN de módulos bloqueada.
+- `npm test`: interface no Microsoft Edge com adaptadores simulados; cobre login, falhas/retry do Firestore, gravação negada, livros, ranking, ordenação, sessão e isolamento de contas.
+- `npm run test:firestore`: emulador oficial (Java 21+), sem acessar produção. Cobre migração, recarga, gravação/remoção atômica, atualizações entre clientes, conflito de revisões e negação de acesso anônimo ou de outra conta.
+- `npm run build`: gera o bundle estático.
+
+Referências: https://firebase.google.com/docs/firestore/manage-data/transactions e https://firebase.google.com/docs/firestore/security/rules-conditions.

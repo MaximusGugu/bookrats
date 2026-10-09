@@ -2,3 +2,7 @@ node_modules/
 test-results/
 .env
 .env.*
+
+.test-tools/
+.firebase/
+*-debug.log

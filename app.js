@@ -11,6 +11,8 @@ const fallback = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://
 let sessionUser = null, authReady = false, authBusy = false, authModule;
 let authMessage = 'Verificando sessão…';
 let state = null;
+let cloudStore=null, cloudReady=false, dataSaving=false, dataLoading=false, remotePending=false;
+let dataMessage='Carregando seus dados…', syncMessage='Conectando ao Firestore…';
 let view = location.hash.slice(1) || 'clube', filter = 'all', query = '';
 const user = () => state.users.find(u=>u.id===state.currentUser);
 const club = () => state.clubs.find(c=>c.id===state.activeClub && c.members.includes(user().id));
@@ -20,7 +22,63 @@ const memberships = () => state.clubs.filter(c=>c.members.includes(user().id));
 const pct = r => Math.min(100,Math.round(r.page / book(r.bookId).pages * 100));
 const statusNames = {wanted:'Quero ler',reading:'Lendo',paused:'Pausado',done:'Concluído'};
 function toast(text) { $('#toast').textContent=text; $('#toast').style.display='block'; clearTimeout(toast.timer); toast.timer=setTimeout(()=>$('#toast').style.display='none',3500); }
-function save() { try { if (!sessionUser) return false; localStorage.setItem(KEY,JSON.stringify(state)); return true; } catch { toast('Armazenamento cheio. Exporte seus dados e reduza as imagens.'); return false; } }
+async function save() {
+  if(!sessionUser||!cloudReady||!cloudStore)throw Error('Aguarde seus dados carregarem.');
+  const store=cloudStore, snapshot=JSON.parse(JSON.stringify(state));
+  dataSaving=true;setSyncStatus('Salvando no Firestore…');
+  try {
+    await store.save(snapshot);
+    if(store!==cloudStore)return false;
+    setSyncStatus('Salvo no Firestore');
+    return true;
+  } catch(error) {
+    if(store===cloudStore){
+      setSyncStatus('Alteração não salva');
+      if(error.code==='bookrats/conflict')remotePending=true;
+    }
+    throw error;
+  } finally {if(store===cloudStore)dataSaving=false;}
+}
+function setSyncStatus(message){syncMessage=message;const el=$('#syncStatus');if(el)el.textContent=message;}
+function cloudMessage(error){return authModule?.cloudError?.(error)||error.message;}
+function emptyAccount(account){return {version:1,currentUser:account.uid,users:[{id:account.uid,name:account.displayName||'Leitor',photo:account.photoURL||'',goal:4,color:'#ddef83'}],books:[],readings:[],clubs:[],activities:[],activeClub:''};}
+async function loadCloud(account) {
+  cloudStore?.stop();
+  let store;
+  try{store=authModule.accountStore(account.uid);}catch(error){cloudReady=false;dataLoading=false;dataMessage=cloudMessage(error);render();return;}
+  cloudStore=store;
+  cloudReady=false;dataLoading=true;dataMessage='Carregando seus livros e clubes…';render();
+  try {
+    const loaded=await store.load(()=>{
+      // Only inspect legacy storage when no cloud account exists. Never replace cloud data.
+      let saved=null;
+      try{saved=localStorage.getItem('bookrats.account.v1:'+account.uid);}catch{};
+      const initial=saved?JSON.parse(saved):emptyAccount(account);
+      validateBackup(initial);
+      if(initial.currentUser!==account.uid)throw Error('O backup local não pertence à conta conectada.');
+      return {state:initial,migrated:!!saved};
+    });
+    if(store!==cloudStore)return;
+    validateBackup(loaded);state=loaded;cloudReady=true;remotePending=false;
+    setSyncStatus('Sincronizado com o Firestore');
+    store.watch(()=>{remotePending=true;refreshCloud();},error=>{if(store===cloudStore){setSyncStatus(cloudMessage(error));}});
+  } catch(error){if(store===cloudStore){cloudReady=false;dataMessage=cloudMessage(error);}}
+  finally{if(store===cloudStore){dataLoading=false;render();}}
+}
+async function refreshCloud(force=false) {
+  if(!cloudStore||!cloudReady||dataSaving||dataLoading)return;
+  if($('#modal').open&&!force){setSyncStatus('Há alterações em outro dispositivo. Feche o formulário para atualizar.');return;}
+  if(!remotePending&&!force)return;
+  const store=cloudStore;dataLoading=true;
+  try{
+    const loaded=await store.read();
+    if(store!==cloudStore)return;
+    if(!loaded)throw Error('Os dados desta conta não estão disponíveis no Firestore.');
+    validateBackup(loaded);state=loaded;remotePending=false;setSyncStatus('Sincronizado com o Firestore');render();
+  }catch(error){if(store===cloudStore){setSyncStatus(cloudMessage(error));toast(cloudMessage(error));}}
+  finally{if(store===cloudStore)dataLoading=false;}
+}
+
 function avatar(id) { const u=person(id); if(!u)return ''; return `<span class="avatar" style="background:${/^#[a-f0-9]{6}$/i.test(u.color)?u.color:'#eedbb7'}" title="${esc(u.name)}">${safeUrl(u.photo)?`<img src="${esc(safeUrl(u.photo))}" alt="${esc(u.name)}">`:esc(u.name.split(' ').map(x=>x[0]).slice(0,2).join(''))}</span>`; }
 function image(b,cls='cover') { return `<img class="${cls}" src="${esc(safeUrl(b.cover)||fallback)}" alt="Capa de ${esc(b.title)}" loading="lazy">`; }
 function daysFor(id,month=false) { const now=new Date(); const start=new Date(now); if(month)start.setDate(1);else start.setDate(now.getDate()-((now.getDay()+6)%7)); start.setHours(0,0,0,0); return new Set(state.readings.filter(r=>r.userId===id).flatMap(r=>r.logs).filter(l=>l.delta>0 && new Date(l.date+'T12:00:00')>=start).map(l=>l.date)); }
@@ -84,11 +142,12 @@ function clubPanel(c) {
 }
 function render(){
   if (!sessionUser) return renderLogin();
+  if(!cloudReady)return renderCloudLoading();
   const filtersOpen = $('.shelf-filters')?.open;
   if(!club())state.activeClub=memberships()[0]?.id||'';
   const c=club();
   const title=view==='clube'&&c?c.name:'bookrats';
-  $('#app').innerHTML=`<div class="shell"><main class="main"><header class="topbar"><${view==='clube'&&c?'h1':'a href="#clube"'} class="topbar-title">${esc(title)}</${view==='clube'&&c?'h1':'a'}><div class="topbar-actions">${themeButton()}<button class="icon-button" data-action="app-menu" aria-label="Abrir menu" aria-haspopup="dialog" title="Menu">${icon('Menu')}</button></div></header><div class="content">${view==='estante'?library():view==='clubes'?clubsPage():view==='perfil'?profilePage():view==='atividade'?`<div class="heading"><h1>Entre uma página e outra</h1></div><div class="feed">${feed()}</div>`:c?clubPage(c):clubsPage()}</div></main></div>`;
+  $('#app').innerHTML=`<div class="shell"><main class="main"><header class="topbar"><${view==='clube'&&c?'h1':'a href="#clube"'} class="topbar-title">${esc(title)}</${view==='clube'&&c?'h1':'a'}><div class="topbar-actions">${themeButton()}<button class="icon-button" data-action="app-menu" aria-label="Abrir menu" aria-haspopup="dialog" title="Menu">${icon('Menu')}</button></div></header><div class="content">${view==='estante'?library():view==='clubes'?clubsPage():view==='perfil'?profilePage():view==='atividade'?`<div class="heading"><h1>Entre uma página e outra</h1></div><div class="feed">${feed()}</div>`:c?clubPage(c):clubsPage()}<div class="sync-bar"><span id="syncStatus" role="status">${esc(syncMessage)}</span><button class="small" data-action="refresh-cloud">Atualizar</button></div></div></main></div>`;
   document.querySelectorAll('img').forEach(img=>img.addEventListener('error',()=>{img.src=fallback;},{once:true}));
   if(filtersOpen && $('.shelf-filters')) $('.shelf-filters').open = true;
 }
@@ -110,7 +169,7 @@ function conversationPanel(c){return `<section class="subsection"><div class="se
 function clubInfo(c){return `<p class="club-description">${esc(c.description)}</p>
   <section class="subsection"><h2>Nosso ritmo</h2><div class="club-goal"><strong>${clubDays(c)}</strong><span> / ${c.target} dias de leitura neste mês</span></div><div class="progress"><i style="width:${Math.min(100,clubDays(c)/c.target*100)}%"></i></div><h3 style="margin-top:24px">Sua semana</h3>${week()}<small>${daysFor(user().id).size} de ${user().goal} dias da sua meta</small></section>
   <section class="subsection"><div class="section-head"><h2>Próxima leitura coletiva</h2><button class="small" data-action="propose">Sugerir livro</button></div>${c.proposals.map(id=>`<div class="vote"><p><strong>${esc(book(id)?.title)}</strong><br><small>${Object.values(c.votes).filter(v=>v===id).length} votos</small></p><button class="small ${c.votes[user().id]===id?'active':''}" data-action="vote" data-id="${id}">${c.votes[user().id]===id?'Retirar voto':'Votar'}</button></div>`).join('')||'<p class="muted">Qual será a próxima história?</p>'}</section><section class="subsection"><div class="section-head"><h2>Encontros</h2><button class="small" data-action="meeting">Agendar</button></div>${c.meetings.map(m=>`<div class="person-row"><div><strong>${esc(m.title)}</strong><p class="muted">${date(m.date)} · ${esc(m.time)} · ${esc(m.place)}</p></div>${m.userId===user().id||c.owner===user().id?`<button class="small" data-action="delete-meeting" data-id="${m.id}">Excluir</button>`:''}</div>`).join('')||'<p class="muted">Nenhum encontro agendado.</p>'}</section>
-  <div class="club-footer"><button data-action="invite">Convidar</button><button data-action="members">Membros</button>${c.owner===user().id?'<button data-action="edit-club">Configurar clube</button>':''}</div>`;}
+  <div class="club-footer"><button data-action="members">Membros</button>${c.owner===user().id?'<button data-action="edit-club">Configurar clube</button>':''}</div>`;}
 function filters(){return `<div class="filterbar"><div class="tabs">${[['all','Todos'],['reading','Lendo agora'],['done','Concluídos']].map(([id,t])=>`<button data-action="filter" data-id="${id}" class="${filter===id?'active':''}">${t}</button>`).join('')}</div><input class="search" id="search" type="search" placeholder="Buscar livro ou autor" aria-label="Buscar livro ou autor" value="${esc(query)}"></div>`;}
 function modifiedAt(b, readings) {
   const time = v => Date.parse(v) || 0;
@@ -130,13 +189,13 @@ function library(){return `${heading('Minha estante','Cada livro, no seu tempo.'
 function clubsPage(){return `${heading('Seus clubes','Encontre sua próxima leitura em boa companhia.','<button class="primary" data-action="new-club">Criar clube</button>')}<div class="collection">${memberships().map(c=>`<article class="club-card"><span class="club-emblem">${esc(c.name[0])}</span><h2>${esc(c.name)}</h2><p class="muted">${esc(c.description)}</p><div class="section-head"><div class="avatars">${c.members.slice(0,5).map(avatar).join('')}</div><button data-action="switch-club" data-id="${c.id}">Abrir clube</button></div></article>`).join('')||'<div class="empty">Crie um clube para começar.</div>'}</div>`;}
 function week(){const days=daysFor(user().id);const start=new Date();start.setDate(start.getDate()-((start.getDay()+6)%7));return `<div class="calendar">${['S','T','Q','Q','S','S','D'].map((n,i)=>{const d=new Date(start);d.setDate(d.getDate()+i);return `<span class="day ${days.has(d.toLocaleDateString('sv-SE'))?'done':''}">${n}<br>${d.getDate()}</span>`;}).join('')}</div>`;}
 function feed(clubId,limit=40){const activities=state.activities.filter(a=>clubId?a.clubs.includes(clubId):a.userId===user().id||a.clubs.some(id=>memberships().some(c=>c.id===id))).slice().reverse().slice(0,limit);return activities.map(a=>`<div class="activity">${avatar(a.userId)}<div><p><strong>${esc(person(a.userId)?.name)}</strong> ${esc(a.text)}</p><small>${date(a.date)}</small><br><button class="reaction ${a.likes.includes(user().id)?'active':''}" data-action="react" data-id="${a.id}">Gostei · ${a.likes.length}</button></div></div>`).join('')||'<p class="muted">As próximas leituras registradas aparecem aqui.</p>';}
-function profilePage(){const rs=state.readings.filter(r=>r.userId===user().id);return `${heading('Seu espaço','Leituras, metas e seus dados.')}<div class="settings"><section><div class="person-row">${avatar(user().id)}<div><h2>${esc(user().name)}</h2><small>Conta Google</small></div><button data-action="edit-profile">Editar perfil</button></div>${week()}<p>${daysFor(user().id).size} de ${user().goal} dias nesta semana</p><div class="actions" style="margin-top:15px">${[rs.some(r=>r.logs.length)&&'Primeiro registro',rs.some(r=>r.status==='done')&&'Primeiro livro concluído',daysFor(user().id).size>=user().goal&&'Meta da semana'].filter(Boolean).map(s=>`<span class="badge">${s}</span>`).join('')}</div></section><section><h2>Conta Google</h2><p>${esc(sessionUser.email)}</p><p class="muted">Seus dados continuam neste navegador, separados por conta.</p><button data-action="sign-out">Sair da conta</button></section><section><h2>Backup local</h2><p class="muted">Exporte antes de limpar os dados do navegador ou trocar de endereço do Live Server.</p><div class="actions" style="margin-top:12px"><button data-action="export">Exportar dados</button><button data-action="import">Importar backup</button></div></section></div>`;}
+function profilePage(){const rs=state.readings.filter(r=>r.userId===user().id);return `${heading('Seu espaço','Leituras, metas e seus dados.')}<div class="settings"><section><div class="person-row">${avatar(user().id)}<div><h2>${esc(user().name)}</h2><small>Conta Google</small></div><button data-action="edit-profile">Editar perfil</button></div>${week()}<p>${daysFor(user().id).size} de ${user().goal} dias nesta semana</p><div class="actions" style="margin-top:15px">${[rs.some(r=>r.logs.length)&&'Primeiro registro',rs.some(r=>r.status==='done')&&'Primeiro livro concluído',daysFor(user().id).size>=user().goal&&'Meta da semana'].filter(Boolean).map(s=>`<span class="badge">${s}</span>`).join('')}</div></section><section><h2>Conta Google</h2><p>${esc(sessionUser.email)}</p><p class="muted">Livros, leituras e clubes são salvos no Firestore e acompanham sua conta.</p><button data-action="sign-out">Sair da conta</button></section><section><h2>Backup dos dados</h2><p class="muted">Exporte uma cópia dos dados da sua conta.</p><div class="actions" style="margin-top:12px"><button data-action="export">Exportar dados</button><button data-action="import">Importar backup</button></div></section></div>`;}
 let submit = null;
 function modal(title,body,onSubmit,button='Salvar'){submit=onSubmit;$('#modalBody').innerHTML=`<div class="modal-head"><h2>${esc(title)}</h2><button type="button" class="close" data-action="close" aria-label="Fechar">×</button></div>${body}${onSubmit?`<div class="form-actions"><button type="button" data-action="close">Cancelar</button><button class="primary" type="submit">${button}</button></div>`:''}`;if(!$('#modal').open)$('#modal').showModal();$('#modalBody input:not([type=checkbox]),#modalBody textarea,#modalBody select')?.focus();}
 const field=(label,name,value='',type='text',extra='')=>`<label>${label}<input type="${type}" name="${name}" value="${esc(type==='url'&&/^assets\//.test(value)?new URL(value,location.href).href:value)}" ${extra}></label>`;
 const select=(label,name,items,value)=>`<label>${label}<select name="${name}">${items.map(([id,t])=>`<option value="${id}" ${value===id?'selected':''}>${esc(t)}</option>`).join('')}</select></label>`;
 function shares(r){return `<div class="span2"><label>Compartilhar nos clubes</label><div class="check-group">${memberships().map(c=>`<label class="check"><input type="checkbox" name="clubs" value="${c.id}" ${(r?.clubs||[]).includes(c.id)?'checked':''}>${esc(c.name)}</label>`).join('')||'<small>Você ainda não participa de clubes.</small>'}</div></div>`;}
-function addBook(existing){const b=existing||{};modal(existing?'Adicionar à minha estante':'Novo livro',`<div class="form-grid">${field('Título','title',b.title,'text','required maxlength="160"')}${field('Autor','author',b.author,'text','required maxlength="120"')}${field('Gênero','genre',b.genre,'text','maxlength="60"')}${field('Total de páginas desta edição','pages',b.pages||'','number','required min="1" max="100000"')}${field('URL da capa','cover',b.cover,'url')}${field('Ou enviar capa','upload','','file','accept="image/png,image/jpeg,image/webp"')}${field('Página atual','page',0,'number','min="0" required')}${select('Status','status',Object.entries(statusNames),'wanted')}${shares({clubs:club()?[club().id]:[]})}</div>`,async fd=>{const pages=Number(fd.get('pages')),page=Number(fd.get('page'));if(page>pages)throw Error('A página atual não pode superar o total.');let coverUrl=fd.get('cover');const file=fd.get('upload');if(file?.size){if(file.size>800000)throw Error('Use uma imagem de até 800 KB.');coverUrl=await readImage(file);}let b=existing;if(!b||b.pages!==pages||b.title!==fd.get('title')||b.author!==fd.get('author')){b={id:uid(),title:fd.get('title').trim(),author:fd.get('author').trim(),genre:fd.get('genre').trim(),pages,cover:coverUrl};state.books.push(b);}if(state.readings.some(r=>r.userId===user().id&&r.bookId===b.id))throw Error('Este livro já está na sua estante.');const status=fd.get('status');state.readings.push({id:uid(),userId:user().id,bookId:b.id,page:status==='done'?pages:page,status:page===pages?'done':status,clubs:fd.getAll('clubs'),started:today(),finished:status==='done'||page===pages?today():'',logs:[]});});}
+function addBook(existing){const b=existing||{};modal(existing?'Adicionar à minha estante':'Novo livro',`<div class="form-grid">${field('Título','title',b.title,'text','required maxlength="160"')}${field('Autor','author',b.author,'text','required maxlength="120"')}${field('Gênero','genre',b.genre,'text','maxlength="60"')}${field('Total de páginas desta edição','pages',b.pages||'','number','required min="1" max="100000"')}${field('URL da capa','cover',b.cover,'url')}${field('Ou enviar capa','upload','','file','accept="image/png,image/jpeg,image/webp"')}${field('Página atual','page',0,'number','min="0" required')}${select('Status','status',Object.entries(statusNames),'wanted')}${shares({clubs:club()?[club().id]:[]})}</div>`,async fd=>{const pages=Number(fd.get('pages')),page=Number(fd.get('page'));if(page>pages)throw Error('A página atual não pode superar o total.');let coverUrl=fd.get('cover');const file=fd.get('upload');if(file?.size){if(file.size>600000)throw Error('Use uma imagem de até 600 KB.');coverUrl=await readImage(file);}let b=existing;if(!b||b.pages!==pages||b.title!==fd.get('title')||b.author!==fd.get('author')){b={id:uid(),title:fd.get('title').trim(),author:fd.get('author').trim(),genre:fd.get('genre').trim(),pages,cover:coverUrl};state.books.push(b);}if(state.readings.some(r=>r.userId===user().id&&r.bookId===b.id))throw Error('Este livro já está na sua estante.');const status=fd.get('status');state.readings.push({id:uid(),userId:user().id,bookId:b.id,page:status==='done'?pages:page,status:page===pages?'done':status,clubs:fd.getAll('clubs'),started:today(),finished:status==='done'||page===pages?today():'',logs:[]});});}
 function readImage(file){return new Promise((resolve,reject)=>{if(!['image/png','image/jpeg','image/webp'].includes(file.type))return reject(Error('Formato de imagem inválido.'));const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('Não foi possível ler a imagem.'));reader.readAsDataURL(file);});}
 function canEditBook(id) {
   return Boolean(book(id)) && state.readings.some(r => r.bookId === id && (
@@ -172,7 +231,7 @@ function editBook(id) {
     if (newCover === new URL(b.cover || '.',location.href).href) newCover = b.cover;
     const file = fd.get('upload');
     if (file?.size) {
-      if (file.size > 800000) throw Error('Use uma imagem de até 800 KB.');
+      if (file.size > 600000) throw Error('Use uma imagem de até 600 KB.');
       newCover = await readImage(file);
     }
     if (fd.has('removeCover')) newCover = '';
@@ -185,10 +244,15 @@ function editReading(id){const r=state.readings.find(r=>r.id===id&&r.userId===us
 function clubForm(edit=false){const c=edit?club():{};modal(edit?'Configurar clube':'Criar clube',`<div class="form-grid">${field('Nome','name',c.name,'text','required maxlength="80"')}${field('Meta coletiva de dias por mês','target',c.target||40,'number','required min="1" max="10000"')}<label class="span2">Descrição<textarea name="description" maxlength="240">${esc(c.description)}</textarea></label></div>`,fd=>{const data={name:fd.get('name').trim(),description:fd.get('description'),target:Number(fd.get('target'))};if(edit)Object.assign(c,data);else{const n={...data,id:uid(),owner:user().id,members:[user().id],token:uid(),votes:{},proposals:[],meetings:[],comments:[]};state.clubs.push(n);state.activeClub=n.id;view='clube';location.hash='clube';}});}
 function download(data,name){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
 function chooseFile(kind){$('#fileInput').dataset.kind=kind;$('#fileInput').value='';$('#fileInput').click();}
-document.addEventListener('click',e=>{const target=e.target.closest('[data-action]');if(!target)return;const a=target.dataset.action,id=target.dataset.id;e.preventDefault();
+document.addEventListener('click',async e=>{const target=e.target.closest('[data-action]');if(!target)return;const a=target.dataset.action,id=target.dataset.id;e.preventDefault();
   if(a==='google-login')return googleLogin();
   if(a==='sign-out')return googleLogout();
   if(!sessionUser)return;
+  if(a==='retry-cloud')return loadCloud(sessionUser);
+  if(a==='refresh-cloud')return refreshCloud(true);
+  if(!cloudReady||dataSaving||dataLoading)return;
+  const before=JSON.stringify(state), originalStore=cloudStore;
+  try {
   const c=club();
   if(a==='app-menu')return appMenu();
   if(a==='edit-book')return editBook(id);
@@ -208,8 +272,8 @@ document.addEventListener('click',e=>{const target=e.target.closest('[data-actio
     $(`[data-action="ranking-period"][data-id="${id}"]`).focus({preventScroll:true});
     return;
   }
-  if(a==='close')return $('#modal').close();if(a==='profile')return navigate('perfil');if(a==='add-book')return addBook();if(a==='book')return details(id);if(a==='adopt')return addBook(book(id));if(a==='log')return logReading(id);if(a==='edit-reading')return editReading(id);if(a==='new-club')return clubForm();if(a==='edit-club'&&c?.owner===user().id)return clubForm(true);
-  if(a==='switch-club'){state.activeClub=id;save();return navigate('clube');}if(a==='filter'){filter=id;return render();}
+  if(a==='close'){$('#modal').close();return refreshCloud();}if(a==='profile')return navigate('perfil');if(a==='add-book')return addBook();if(a==='book')return details(id);if(a==='adopt')return addBook(book(id));if(a==='log')return logReading(id);if(a==='edit-reading')return editReading(id);if(a==='new-club')return clubForm();if(a==='edit-club'&&c?.owner===user().id)return clubForm(true);
+  if(a==='switch-club'){state.activeClub=id;await save();return navigate('clube');}if(a==='filter'){filter=id;return render();}
   if(a==='log-picker'){const rs=state.readings.filter(r=>r.userId===user().id);return modal('Registrar leitura',rs.map(r=>`<div class="person-row"><div><strong>${esc(book(r.bookId).title)}</strong><p class="muted">Página ${r.page} de ${book(r.bookId).pages}</p></div><button type="button" data-action="log" data-id="${r.id}">Registrar</button></div>`).join('')||'<button type="button" data-action="add-book">Adicionar primeiro livro</button>',null);}
   if(a==='remove-reading'){if(!confirm('Remover este livro da sua estante e seu histórico pessoal?'))return;state.readings=state.readings.filter(r=>!(r.id===id&&r.userId===user().id));$('#modal').close();}
   if(a==='react'){const item=state.activities.find(a=>a.id===id);item.likes=item.likes.includes(user().id)?item.likes.filter(x=>x!==user().id):[...item.likes,user().id];}
@@ -222,9 +286,26 @@ document.addEventListener('click',e=>{const target=e.target.closest('[data-actio
   if(a==='person'){const p=person(id);const shared=state.readings.filter(r=>r.userId===id&&(id===user().id||r.clubs.some(cid=>memberships().some(c=>c.id===cid))));return modal(p.name,`<div class="person-row">${avatar(id)}<div><p>${shared.length} livros compartilhados com você</p></div></div>${shared.map(r=>`<div class="person-row"><div><strong>${esc(book(r.bookId).title)}</strong><p class="muted">${statusNames[r.status]} · ${pct(r)}%</p></div></div>`).join('')}`,null);}
   if(a==='members')return modal('Pessoas do clube',c.members.map(id=>`<div class="person-row">${avatar(id)}<div><strong>${esc(person(id)?.name)}</strong><small> · ${id===c.owner?'Administrador':'Membro'}</small></div>${c.owner===user().id&&id!==user().id?`<button type="button" class="small danger" data-action="remove-member" data-id="${id}">Remover</button>`:''}</div>`).join('')+(c.owner!==user().id?'<button type="button" class="danger" style="margin-top:18px" data-action="leave">Sair do clube</button>':''),null);
   if(a==='remove-member'||a==='leave'){const who=a==='leave'?user().id:id;if((a==='leave'||c.owner===user().id)&&who!==c.owner){c.members=c.members.filter(x=>x!==who);delete c.votes[who];state.readings.filter(r=>r.userId===who).forEach(r=>r.clubs=r.clubs.filter(x=>x!==c.id));$('#modal').close();}}
-  if(a==='export')return download(state,`bookrats-backup-${today()}.json`);if(a==='import')return chooseFile('backup');save();render();
+  if(a==='export')return download(state,`bookrats-backup-${today()}.json`);if(a==='import')return chooseFile('backup');await save();render();await refreshCloud();
+  }catch(error){if(originalStore===cloudStore){state=JSON.parse(before);render();toast(cloudMessage(error));}}
 });
-$('#modalForm').addEventListener('submit',async e=>{e.preventDefault();if(!submit||(!sessionUser))return;const button=$('#modalForm button[type=submit]');button.disabled=true;const before=JSON.stringify(state), originalState=state, originalKey=KEY;try{await submit(new FormData(e.target));if(KEY!==originalKey||(!sessionUser))return;if(state===originalState)stampChanges(JSON.parse(before));if(!save())throw Error('Não foi possível salvar.');$('#modal').close();render();toast('Salvo.');}catch(error){if(KEY===originalKey&&sessionUser){state=JSON.parse(before);toast(error.message);}}finally{button.disabled=false;}});
+$('#modalForm').addEventListener('submit',async e=>{
+  e.preventDefault();if(!submit||!sessionUser||!cloudReady||dataSaving||dataLoading)return;
+  const button=$('#modalForm button[type=submit]'), before=JSON.stringify(state), originalState=state, originalStore=cloudStore;
+  button.disabled=true;dataSaving=true;
+  try{
+    await submit(new FormData(e.target));
+    if(originalStore!==cloudStore)return;
+    if(state===originalState)stampChanges(JSON.parse(before));
+    await save();
+    if(originalStore!==cloudStore)return;
+    $('#modal').close();render();toast('Salvo no Firestore.');
+  }catch(error){if(originalStore===cloudStore){restoreState(JSON.parse(before));toast(cloudMessage(error));}}
+  finally{button.disabled=false;if(originalStore===cloudStore){dataSaving=false;refreshCloud();}}
+});
+$('#modal').addEventListener('close',()=>refreshCloud());
+window.addEventListener('online',()=>{if(cloudReady)refreshCloud(true);});
+
 document.addEventListener('input',e=>{if(e.target.id==='search'){query=e.target.value;const rs=view==='estante'?state.readings.filter(r=>r.userId===user().id):state.readings.filter(r=>r.clubs.includes(club().id)&&club().members.includes(r.userId));$('.shelf').innerHTML=shelf(rs);}});
 $('#fileInput').addEventListener('change',async e=>{
   if(!sessionUser)return;
@@ -234,7 +315,7 @@ $('#fileInput').addEventListener('change',async e=>{
     if(sessionUser?.uid!==accountId)return;
     validateBackup(data);
     if(data.currentUser!==accountId)throw Error('Este backup pertence a outra conta.');
-    modal('Restaurar backup','<p>Esta ação substitui os dados desta conta neste navegador. Exporte um backup antes de continuar.</p>',()=>{state=data;},'Substituir dados');
+    modal('Restaurar backup','<p>Esta ação substitui os dados desta conta no Firestore, em todos os dispositivos. Exporte um backup antes de continuar.</p>',()=>{state=JSON.parse(JSON.stringify(data));},'Substituir dados');
   }catch(error){toast(error.message);}
 });
 function validateBackup(d){if(d.version!==1||!['users','books','readings','clubs','activities'].every(k=>Array.isArray(d[k]))||!d.users.some(u=>u.id===d.currentUser))throw Error('Backup Bookrats inválido.');const ids=new Set(d.users.map(u=>u.id));for(const u of d.users)if(typeof u.name!=='string'||!Number.isInteger(u.goal)||u.goal<1||u.goal>7)throw Error('Perfil inválido no backup.');for(const b of d.books)if(typeof b.title!=='string'||typeof b.author!=='string'||!Number.isInteger(b.pages)||b.pages<1)throw Error('Livro inválido no backup.');for(const c of d.clubs)if(typeof c.name!=='string'||!Array.isArray(c.members)||!c.members.every(id=>ids.has(id))||!c.members.includes(c.owner)||!Array.isArray(c.proposals)||!Array.isArray(c.meetings)||!Array.isArray(c.comments)||!c.votes||!(c.target>0))throw Error('Clube inválido no backup.');for(const r of d.readings)if(!ids.has(r.userId)||!d.books.some(b=>b.id===r.bookId&&r.page>=0&&r.page<=b.pages)||!Array.isArray(r.clubs)||!Array.isArray(r.logs)||!statusNames[r.status])throw Error('Leitura inválida no backup.');for(const a of d.activities)if(!Array.isArray(a.clubs)||!Array.isArray(a.likes)||!ids.has(a.userId))throw Error('Atividade inválida no backup.');}
@@ -265,22 +346,12 @@ async function initializeLogin() {
     authModule=window.BookratsAuth;
     if(!authModule)throw Error('Arquivo de autenticação não carregado. Recarregue a página');
     await authModule.startAuth(config, account=>{
+      cloudStore?.stop();cloudStore=null;cloudReady=false;dataSaving=false;dataLoading=false;remotePending=false;
       $('#modal').close();submit=null;
-      sessionUser=account;
-      state=null;
-      if(account) {
-        KEY='bookrats.account.v1:'+account.uid;
-        try {
-          const saved=localStorage.getItem(KEY);
-          state=saved?JSON.parse(saved):{version:1,currentUser:account.uid,users:[{id:account.uid,name:account.displayName||'Leitor',photo:account.photoURL||'',goal:4,color:'#ddef83'}],books:[],readings:[],clubs:[],activities:[],activeClub:''};
-          validateBackup(state);
-          if(!state.users.some(u=>u.id===account.uid))throw Error('Perfil ausente');
-          state.currentUser=account.uid;
-        } catch {
-          sessionUser=null;authMessage='Não foi possível abrir os dados desta conta. O armazenamento foi preservado.';render();return;
-        }
-      } else authMessage='Entre para acessar sua conta.';
-      filter='all';query='';render();
+      sessionUser=account;state=null;
+      if(account){KEY='bookrats.account.v1:'+account.uid;loadCloud(account);}
+      else {authMessage='Entre para acessar sua conta.';render();}
+      filter='all';query='';
     });
     authReady=true;render();
   } catch(error) {authMessage=authModule?.authError(error)||error.message;}
@@ -300,4 +371,16 @@ async function googleLogout() {
   try{await authModule.logout();}
   catch{toast('Não foi possível sair. Tente novamente.');}
   finally{authBusy=false;render();}
+}
+
+function renderCloudLoading(){
+  $('#app').innerHTML='<main class="login-page"><section class="login-card"><h1>bookrats</h1><p role="status">'+esc(dataMessage)+'</p>'+(!dataLoading?'<button class="primary" data-action="retry-cloud">Tentar carregar novamente</button>':'')+'<button data-action="sign-out">Sair da conta</button></section></main>';
+}
+
+function restoreState(previous){
+  for(const key of ['users','books','readings','clubs','activities']){
+    const existing=new Map(state[key].map(item=>[item.id,item]));
+    state[key]=previous[key].map(item=>{const target=existing.get(item.id);if(!target)return item;for(const k of Object.keys(target))delete target[k];return Object.assign(target,item);});
+  }
+  state.currentUser=previous.currentUser;state.activeClub=previous.activeClub;state.version=previous.version;
 }

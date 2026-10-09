@@ -1,3 +1,6 @@
+import { getFirestore } from 'firebase/firestore';
+import { createCloudStore } from './cloud.js';
+export { cloudError } from './cloud.js';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, setPersistence, browserLocalPersistence, browserSessionPersistence, inMemoryPersistence, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 let auth;
@@ -33,4 +36,9 @@ export function authError(error) {
     'auth/web-storage-unsupported': 'O navegador bloqueou o armazenamento da sessão. Permita os dados deste site.',
     'auth/invalid-api-key': 'A chave pública do Firebase é inválida. Confira firebase-config.js.'
   })[error.code] || ('Não foi possível iniciar o login (' + (error.code || error.message || 'erro desconhecido') + '). Tente novamente.');
+}
+
+export function accountStore(uid) {
+  if(auth.currentUser?.uid!==uid)throw Error('Entre na conta antes de carregar seus dados.');
+  return createCloudStore(getFirestore(auth.app),uid);
 }

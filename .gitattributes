@@ -1,0 +1,2 @@
+# Generated SDK bundle can contain intentional whitespace inside template strings.
+auth.bundle.js -whitespace

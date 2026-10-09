@@ -4,11 +4,14 @@
   "private": true,
   "scripts": {
     "test": "node smoke.cjs && node auth-order.test.cjs",
-    "build": "esbuild auth.js --bundle --format=iife --global-name=BookratsAuth --minify --outfile=auth.bundle.js"
+    "build": "esbuild auth.js --bundle --format=iife --global-name=BookratsAuth --minify --outfile=auth.bundle.js",
+    "test:firestore": "firebase emulators:exec --only firestore --project demo-bookrats \"node firestore.test.cjs\""
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@playwright/test": "^1.64.0",
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "firebase-tools": "^15.33.0"
   },
   "dependencies": {
     "firebase": "^12.7.0"

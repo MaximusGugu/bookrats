@@ -1,0 +1,44 @@
+const {initializeTestEnvironment,assertFails,assertSucceeds}=require('@firebase/rules-unit-testing');
+const {doc,getDoc,setDoc,updateDoc,serverTimestamp}=require('firebase/firestore');
+const fs=require('node:fs');const assert=require('node:assert/strict');
+(async()=>{
+ require('esbuild').buildSync({entryPoints:['cloud.js'],bundle:true,platform:'node',format:'cjs',external:['firebase/*'],outfile:'test-results/cloud.cjs'});
+ const {createCloudStore,encodeState}=require('./test-results/cloud.cjs');
+ const env=await initializeTestEnvironment({projectId:'demo-bookrats',firestore:{host:'127.0.0.1',port:8080,rules:fs.readFileSync('firestore.rules','utf8')}});
+ try{
+  await env.clearFirestore();
+  const alice=env.authenticatedContext('alice').firestore(),bob=env.authenticatedContext('bob').firestore(),anon=env.unauthenticatedContext().firestore();
+  const base={version:1,currentUser:'alice',activeClub:'c1',users:[{id:'alice',name:'Alice',goal:4}],books:[{id:'b1',title:'Original',pages:200}],readings:[{id:'r1',userId:'alice',bookId:'b1',page:0,status:'wanted',clubs:['c1'],logs:[]}],clubs:[{id:'c1',name:'Clube',owner:'alice',members:['alice']}],activities:[]};
+  const a=createCloudStore(alice,'alice');
+  const loaded=await a.load(()=>({state:base,migrated:true}));
+  assert.deepEqual(loaded,base);
+  assert.equal((await getDoc(doc(alice,'bookratsAccounts/alice'))).data().migratedFromLocal,true);
+  const second=createCloudStore(alice,'alice');
+  assert.deepEqual(await second.load(()=>{throw Error('Existing cloud data must win');}),base);
+  await assertFails(getDoc(doc(anon,'bookratsAccounts/alice')));
+  await assertFails(getDoc(doc(bob,'bookratsAccounts/alice/items/books_b1')));
+  await assertFails(setDoc(doc(bob,'bookratsAccounts/alice/items/books_hacked'),{kind:'books',position:0,data:{id:'hacked'}}));
+  await assertFails(setDoc(doc(alice,'bookratsAccounts/alice/items/books_hacked'),{kind:'books',position:0,data:{id:'hacked'}}));
+  await assertFails(updateDoc(doc(alice,'bookratsAccounts/alice'),{revision:900,updatedAt:serverTimestamp()}));
+  const next=structuredClone(base);next.books[0].title='Atualizado';next.readings[0].page=50;
+  await a.save(next);
+  assert.deepEqual(await a.read(),next);
+  await assert.rejects(()=>second.save({...base,activeClub:''}),e=>e.code==='bookrats/conflict');
+  assert.equal((await a.read()).books[0].title,'Atualizado');
+  await second.read();
+  let notified;
+  const changed=new Promise(resolve=>notified=resolve);
+  second.watch(notified,e=>{throw e;});
+  const removed=structuredClone(next);removed.readings=[];removed.books=[];
+  await a.save(removed);
+  await Promise.race([changed,new Promise((_,reject)=>setTimeout(()=>reject(Error('Listener timed out')),8000))]);
+  assert.deepEqual(await second.read(),removed);
+  assert.equal((await getDoc(doc(alice,'bookratsAccounts/alice/items/books_b1'))).exists(),false);
+  assert.throws(()=>encodeState({...base,books:[{id:'huge',cover:'a'.repeat(900001)}]},'alice'),/limite/);
+  a.stop();await assert.rejects(()=>a.save(base),/sessão/);
+  second.stop();
+  const b=createCloudStore(bob,'bob');const bobData={...base,currentUser:'bob',users:[{id:'bob',name:'Bob',goal:4}],books:[],readings:[],clubs:[],activeClub:''};
+  assert.deepEqual(await b.load(()=>({state:bobData,migrated:false})),bobData);b.stop();
+  console.log('PASS: real Firestore emulator: migration, reload, atomic save/delete, live updates, conflict rejection, auth isolation and rules.');
+ }finally{await env.cleanup();}
+})().catch(e=>{console.error(e);process.exitCode=1;});

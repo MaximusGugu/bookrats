@@ -12,7 +12,7 @@ const assert = require('node:assert/strict');
     await page.route('http://127.0.0.1:8123/**', async route => {
       const file = new URL(route.request().url()).pathname.slice(1) || 'index.html';
       if(file==='auth.bundle.js')return route.fulfill({contentType:'text/javascript',body:(await fs.readFile('tests/fixture.js','utf8'))+`
-window.BookratsAuth={async startAuth(c,cb){if(!localStorage.getItem('bookrats.account.v1:you'))localStorage.setItem('bookrats.account.v1:you',JSON.stringify(seed()));cb({uid:'you',email:'test@example.com'});}};`});
+window.BookratsAuth={async startAuth(c,cb){if(!localStorage.getItem('bookrats.account.v1:you'))localStorage.setItem('bookrats.account.v1:you',JSON.stringify(seed()));cb({uid:'you',email:'test@example.com'});}};`+(await fs.readFile('tests/cloud-mock.js','utf8'))});
       await route.fulfill({ body: await fs.readFile(path.join(__dirname, file)), contentType: file.endsWith('.jpg') ? 'image/jpeg' : file.endsWith('.css') ? 'text/css' : file.endsWith('.js') ? 'text/javascript' : 'text/html' });
     });
     await page.goto('http://127.0.0.1:8123/');
@@ -82,7 +82,8 @@ window.BookratsAuth={async startAuth(c,cb){if(!localStorage.getItem('bookrats.ac
     await page.locator('dialog').getByRole('button', { name: 'Registrar leitura', exact: true }).click();
     await page.locator('[name=page]').fill('40');
     await page.getByRole('button', { name: 'Registrar', exact: true }).click();
-    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('bookrats.account.v1:you')).readings.at(-1).page), 40);
+    await page.waitForFunction(()=>!document.querySelector('dialog').open);
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('test.cloud.you')).readings.at(-1).page), 40);
     await page.getByRole('tab', { name: 'Ranking', exact: true }).click();
     assert.equal(await page.locator('.ranking-row.is-you .ranking-score strong').textContent(), '1');
     for (const name of ['Mensal','Geral','Semanal']) {

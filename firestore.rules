@@ -1,0 +1,42 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function owns(uid) { return request.auth != null && request.auth.uid == uid; }
+    match /bookratsAccounts/{uid} {
+      allow read: if owns(uid);
+      allow create: if owns(uid)
+        && request.resource.data.keys().hasOnly(['version','currentUser','activeClub','revision','migratedFromLocal','updatedAt'])
+        && request.resource.data.version == 1
+        && request.resource.data.currentUser == uid
+        && request.resource.data.activeClub is string
+        && request.resource.data.revision == 1
+        && request.resource.data.migratedFromLocal is bool
+        && request.resource.data.updatedAt == request.time;
+      allow update: if owns(uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['activeClub','revision','updatedAt'])
+        && request.resource.data.activeClub is string
+        && request.resource.data.revision == resource.data.revision + 1
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+      match /items/{itemId} {
+        function commitChanged() {
+          let path = /databases/$(database)/documents/bookratsAccounts/$(uid);
+          return getAfter(path).data.currentUser == uid
+            && getAfter(path).data.updatedAt == request.time
+            && (!exists(path) || getAfter(path).data.revision == get(path).data.revision + 1);
+        }
+        function validItem() {
+          let value = request.resource.data;
+          return value.keys().hasOnly(['kind','position','data'])
+            && value.kind in ['users','books','readings','clubs','activities']
+            && value.position is int && value.position >= 0
+            && value.data is map && value.data.id is string
+            && itemId == value.kind + '_' + value.data.id;
+        }
+        allow read: if owns(uid);
+        allow create, update: if owns(uid) && commitChanged() && validItem();
+        allow delete: if owns(uid) && commitChanged();
+      }
+    }
+  }
+}
