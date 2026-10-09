@@ -26,9 +26,13 @@ const assert = require('node:assert/strict');
     });
 
     assert.equal(await page.locator('.sync-bar').count(),0,'sync controls removed');
-    await page.evaluate(()=>addBook());
+    const modalScrollBefore=await page.evaluate(()=>{window.scrollTo(0,200);const value=window.scrollY;addBook();return value;});
+    assert.equal(await page.locator('body').evaluate(el=>el.classList.contains('modal-open')&&getComputedStyle(el).position==='fixed'),true,'background scroll is locked while modal is open');
+    assert.equal(await page.locator('body').evaluate(el=>el.style.top),`-${modalScrollBefore}px`,'locked modal preserves page position');
     assert.equal(await page.locator('input[name=title]').evaluate(el=>getComputedStyle(el).fontSize),'16px','mobile text fields avoid iOS focus zoom');
-    await page.locator('[data-action=close]').first().click();
+    await page.mouse.click(2,2);
+    await page.waitForFunction(()=>!document.querySelector('#modal').open&&!document.body.classList.contains('modal-open'));
+    assert.equal(await page.evaluate(()=>window.scrollY),modalScrollBefore,'closing modal restores page position');
     assert.match(await page.locator('[data-action=log-picker] svg path').first().getAttribute('d'),/^M7 4\.5/,'bookmark icon');
     await page.getByRole('button',{name:'Abrir menu'}).click();
     await page.locator('.menu-profile').click();

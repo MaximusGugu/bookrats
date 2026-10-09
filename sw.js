@@ -1,7 +1,7 @@
-const CACHE = 'bookrats-shell-v16';
+const CACHE = 'bookrats-shell-v17';
 const SHELL = [
-  './', './index.html', './styles.css?v=16', './mobile.css?v=16', './theme.css?v=14',
-  './firebase-config.js?v=12', './auth.bundle.js?v=14', './app.js?v=16',
+  './', './index.html', './styles.css?v=17', './mobile.css?v=16', './theme.css?v=14',
+  './firebase-config.js?v=12', './auth.bundle.js?v=14', './app.js?v=17',
   './manifest.webmanifest', './brand/logo-branco.png', './brand/logo-claro.png',
   './brand/logo-escuro.png', './brand/app-icon-192.png', './brand/app-icon-512.png'
 ];
