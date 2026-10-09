@@ -1,0 +1,29 @@
+:root{color-scheme:light}
+:root[data-theme="dark"]{color-scheme:dark;--green:#a9cf9c;--muted:#a1aea4;--line:#37433b;--paper:#222a25;--accent:#ddef83;color:#e5ece3;background:#171d1a}
+[data-theme="dark"] body{background:#171d1a;color:#e5ece3}
+[data-theme="dark"] :is(.topbar-title,.icon-button,.club-tabs button[aria-selected=true],.club-goal strong){color:#d2e5ca}
+[data-theme="dark"] :is(.shelf-caption,.shelf-filters summary,.club-tabs button,.ranking-range,.ranking-position,.club-description,.club-goal,.club-footer button,.menu-label,.menu-links svg){color:#a1aea4}
+[data-theme="dark"] :is(button,input,select,textarea,dialog,.club-card,.shelf-filter-content){background:#222a25;color:#e5ece3;border-color:#37433b}
+[data-theme="dark"] :is(input,textarea)::placeholder{color:#8e9c93}
+[data-theme="dark"] :is(input,select,textarea):focus{border-color:#a9cf9c;box-shadow:0 0 0 3px #a9cf9c20}
+[data-theme="dark"] button:hover{background:#303c32}
+[data-theme="dark"] button.primary{background:#bdd5a7;color:#17251b;border-color:#bdd5a7}
+[data-theme="dark"] button.primary:hover{background:#d1e5bc}
+[data-theme="dark"] button.danger{color:#f2a1a7}
+[data-theme="dark"] :is(.icon-button,.member-button,.member-overflow,.club-tabs button,.club-footer button,.menu-links button,.menu-links a,.close,.tabs button,.ranking-periods button){background:transparent}
+[data-theme="dark"] :is(.icon-button:hover,.member-button:hover,.shelf-filters summary:hover,.menu-links a:hover,.menu-links button:hover,.menu-links a[aria-current=page],.tabs button.active,button.active,.day,.ranking-periods){background:#2b362d;color:#d6e7ce}
+[data-theme="dark"] :is(.ranking-periods button[aria-pressed=true],.ranking-row.is-you,.badge){background:#354632;color:#e0edd7}
+[data-theme="dark"] .reading-actions .icon-button{background:#222a25}
+[data-theme="dark"] .avatar{border-color:#171d1a;color:#24332c}
+[data-theme="dark"] .cover{box-shadow:3px 4px 10px #0005}
+[data-theme="dark"] .cover-button:after{background:#3c4b3d;border-color:#2a362c;box-shadow:0 5px 7px #0002}
+[data-theme="dark"] .progress{background:#344037}
+[data-theme="dark"] .progress>i{background:#a0bd8c}
+[data-theme="dark"] .club-tabs button[aria-selected=true]:after{background:#b7d3a2}
+[data-theme="dark"] :is(.activity,.vote){border-color:var(--line)}
+[data-theme="dark"] .day.done{background:#bdd5a7;color:#17251b}
+[data-theme="dark"] .challenge{background:#303a28}
+[data-theme="dark"] .club-emblem{background:#414b2d;color:#e3edb5}
+[data-theme="dark"] .topbar{background:transparent}
+[data-theme="dark"] dialog::backdrop{background:#050907b3}
+[data-theme="dark"] #toast{background:#d2e1c6;color:#1c2b20}
