@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "test": "node smoke.cjs && node auth-order.test.cjs",
+    "test": "node smoke.cjs && node auth-order.test.cjs && node invite-ui.test.cjs",
     "build": "esbuild auth.js --bundle --format=iife --global-name=BookratsAuth --minify --outfile=auth.bundle.js",
-    "test:firestore": "firebase emulators:exec --only firestore --project demo-bookrats \"node firestore.test.cjs\""
+    "test:firestore": "firebase emulators:exec --only firestore --project demo-bookrats \"node firestore.test.cjs && node shared.test.cjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.2",

@@ -71,22 +71,24 @@ export function createCloudStore(db, uid) {
       return read();
     },
     read,
-    async save(state) {
+    async save(state, extension) {
       active();
       if (!baseline) throw Error('Os dados ainda não foram carregados.');
       const snapshot = clone(state);
       const previous = encodeState(baseline,uid), next = encodeState(snapshot,uid);
       const changes = [...next].filter(([key,value])=>JSON.stringify(value)!==JSON.stringify(previous.get(key)));
       for(const key of previous.keys()) if(!next.has(key)) changes.push([key,null]);
-      if(!changes.length && snapshot.activeClub===baseline.activeClub)return;
+      if(!changes.length && snapshot.activeClub===baseline.activeClub&&!extension)return;
       limitWrites(changes);
       const expected = revision;
       await runTransaction(db, async tx => {
         active();
         const current = await tx.get(root);
         if(!current.exists() || current.data().revision!==expected)throw conflict();
+        const writeShared=extension?await extension(tx):null;
         tx.update(root,{activeClub:snapshot.activeClub||'',revision:expected+1,updatedAt:serverTimestamp()});
         for(const [id,value] of changes) value ? tx.set(doc(items,id),value) : tx.delete(doc(items,id));
+        writeShared?.();
       });
       active();
       revision=expected+1;baseline=snapshot;

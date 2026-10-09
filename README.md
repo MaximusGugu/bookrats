@@ -1,45 +1,52 @@
 # Bookrats
 
-Aplicação estática com login obrigatório por Google e dados no Cloud Firestore.
+Aplicação estática com login Google, dados privados no Firestore e clubes compartilhados por convite.
 
 ## Executar
 
-Abra `index.html` pelo Live Server em **http://localhost:5500** (ou a porta configurada). Não use `file://`. O SDK está incluído em `auth.bundle.js`.
+Abra `index.html` com Live Server em **http://localhost:5500** (ou a porta configurada). O SDK está incluído em `auth.bundle.js`. Para alterar `auth.js`, `cloud.js` ou `shared.js`: `npm ci` e `npm run build`; publique o bundle junto.
 
-Para alterar o código de autenticação/Firestore: `npm ci`, edite `auth.js` ou `cloud.js` e execute `npm run build`. Publique também o bundle gerado. O projeto é `bookrats-ea53d`; a configuração web pública está em `firebase-config.js`. Não há inicialização do Analytics.
+Projeto Firebase: **bookrats-ea53d**, banco **(default)**. A configuração web pública está em `firebase-config.js`. O provedor Google deve estar habilitado e o host autorizado no Firebase Authentication. Não há Analytics. Nunca conectar ao projeto/documento do Entrelinhas.
 
-## Ativar Firestore
+## Regras do Firestore
 
-1. No Firebase Console, selecione **bookrats-ea53d → Firestore Database → Criar banco**. Use o banco **(default)** e modo de produção, escolhendo a região apropriada.
-2. Em **Firestore Database → Regras**, substitua o conteúdo pelo arquivo **firestore.rules** e clique **Publicar**. Essas regras se destinam ao projeto exclusivo do Bookrats.
-3. Recarregue o app e entre com Google. Ele carregará seus dados ou migrará os dados da conta que estão neste navegador.
+**Esta versão precisa das regras atualizadas de `firestore.rules`.** No Firebase Console → Firestore Database → Regras, substitua o conteúdo pelo arquivo completo e clique Publicar. As regras incluem contas privadas, clubes, membros e convites; não acrescente permissões globais.
 
-Alternativa por CLI autenticada: `npx firebase deploy --only firestore --project bookrats-ea53d`. O arquivo de índices desativa a indexação de campos de conteúdo; as consultas usadas não exigem índices compostos.
+Alternativa com CLI autenticada: `npx firebase deploy --only firestore --project bookrats-ea53d`. As consultas não exigem índices compostos.
 
-## Dados e sincronização
+## Convites por link
 
-Cada conta tem seu espaço em `bookratsAccounts/{uid}`. Metadados e revisão ficam no documento da conta; cada livro, leitura, clube, perfil e atividade ocupa um documento próprio na subcoleção `items`. As regras permitem leitura e escrita apenas ao UID dono da conta. Todos os caminhos não declarados ficam bloqueados.
+1. Abra o clube como administrador e use **Menu → Convidar por link** (também disponível na aba Clube).
+2. Copie o link e compartilhe. Ele vale por **7 dias**. Links gerados no localhost apontam para `https://maximusgugu.github.io/bookrats/`, para funcionar no computador/celular dos convidados.
+3. O convidado abre o link, entra com Google e confirma **Entrar no clube**. Abrir o link ou fazer login não aceita automaticamente. A entrada repetida é idempotente.
+4. **Gerar novo link** invalida o anterior. **Revogar link** impede novas entradas pelo link atual e preserva os membros existentes. Remover um membro revoga também o link atual, evitando reentrada por ele. O administrador não pode sair do próprio clube nesta versão.
 
-**Esta etapa sincroniza os dados da mesma conta entre dispositivos. Clubes ainda são privados à conta; convites e colaboração entre contas não estão implementados.**
+O primeiro convite converte o clube privado existente em um clube compartilhado real, preservando seu ID e conteúdo. Os perfis demonstrativos antigos não se tornam membros autenticados. Apenas leituras do administrador marcadas para aquele clube são publicadas inicialmente. Membros novos começam sem compartilhar livros; eles escolhem os clubes ao cadastrar/editar uma leitura.
 
-O Firestore é a fonte dos dados. O app só confirma gravações após o servidor responder e mantém o formulário aberto quando a gravação falha. Operações são transacionais: ou todos os registros são gravados, ou nenhum. Uma revisão impede que uma aba desatualizada sobrescreva outra silenciosamente; feche o formulário e atualize para refazer a alteração. O listener atualiza a interface ao detectar uma nova revisão, sem substituir formulários em edição.
+Os convites usam tokens aleatórios de 256 bits, acessíveis individualmente após login. Não há listagem de convites. As regras validam validade, token ativo e associação ao clube no servidor. Uma revogação entre a prévia e a confirmação também bloqueia a entrada.
 
-No primeiro acesso, a chave anterior `bookrats.account.v1:<uid>` é importada somente se a conta ainda não existir no Firestore. A importação é atômica, mantém os IDs e não apaga a cópia local. Se já há dados na nuvem, eles prevalecem e o armazenamento antigo não é lido. Nenhuma nova gravação de livros/clubes vai para localStorage. O tema e a persistência de autenticação continuam locais.
+## Dados privados e compartilhados
 
-Backups JSON continuam disponíveis e só podem ser restaurados na mesma conta. Restaurar substitui os dados no Firestore e afeta todos os dispositivos dessa conta. Cada operação suporta até 450 registros alterados e 8 MB de conteúdo; cada registro deve ter menos de 900 KB. Novas capas enviadas são limitadas a 600 KB. Uma importação acima do limite é recusada antes de gravar; use URLs para capas ou um backup menor.
+- `bookratsAccounts/{uid}` e `items`: estante, perfil, leituras e atividades privados da conta. Somente o UID dono pode ler/escrever.
+- `bookratsAccounts/{uid}/clubLinks`: referências aos clubes. Uma referência só pode ser criada se o usuário se tornou membro. Referências antigas funcionam como marcadores para impedir que um clube removido reapareça a partir da cópia privada.
+- `bookratsClubs/{clubId}`: informações do clube, comentários, votos e encontros; somente membros podem ler. O administrador controla nome, configurações e convites. Membros só alteram seus votos, acrescentam seus comentários/encontros e removem seus próprios encontros.
+- Subcoleções `members`, `readings` e `activities`: perfis de membros e cópias apenas dos dados compartilhados naquele clube. As leituras omitem as notas privadas e os IDs de outros clubes. Cada pessoa altera suas leituras; reações só permitem adicionar/remover o próprio UID. A remoção do membro bloqueia o acesso imediatamente.
+- `bookratsInvites/{token}`: nome/ID do clube e validade; não expõe livros nem a lista de membros antes da entrada.
 
-As estantes mantêm a ordem da alteração mais recente, incluindo edições, progresso e status.
+As telas acompanham atualizações do clube em tempo real. Formulários abertos não são substituídos: uma revisão impede sobrescritas silenciosas quando outra pessoa salva primeiro. O app só mostra sucesso depois de a gravação ser confirmada. Estante privada e alterações compartilhadas da mesma ação são gravadas na mesma transação.
 
-## Autenticação
+Os metadados de uma edição pertencem à leitura de cada pessoa. Para sugerir uma leitura coletiva, o livro deve estar compartilhado no clube. Backups continuam exportáveis; a restauração de backups com clubes compartilhados fica bloqueada para não sobrescrever dados dos demais membros.
 
-Habilite Google em Firebase Authentication. `localhost` e `maximusgugu.github.io` estavam autorizados no projeto na última verificação. Adicione `127.0.0.1` separadamente caso use esse endereço. Permita pop-ups. Falhas mostram uma mensagem e permitem tentar novamente.
+## Migração e limites
 
-Nunca conectar ao projeto/documento do Entrelinhas. O projeto Bookrats tem suas próprias regras e coleções.
+Os dados antigos de `bookrats.account.v1:<uid>` só são importados se a conta ainda não existir no Firestore. A importação mantém IDs e não apaga a cópia antiga. Dados existentes na nuvem prevalecem.
+
+Gravações privadas suportam até 450 registros alterados e 8 MB por operação. Cada registro deve ter menos de 900 KB; novas capas têm limite de 600 KB. Uma ação pode atualizar até cinco clubes compartilhados e 400 registros compartilhados. Use URLs para capas grandes. Erros de limite não são apresentados como sucesso.
 
 ## Testes
 
-- `npm test`: interface no Microsoft Edge com adaptadores simulados; cobre login, falhas/retry do Firestore, gravação negada, livros, ranking, ordenação, sessão e isolamento de contas.
-- `npm run test:firestore`: emulador oficial (Java 21+), sem acessar produção. Cobre migração, recarga, gravação/remoção atômica, atualizações entre clientes, conflito de revisões e negação de acesso anônimo ou de outra conta.
+- `npm test`: testes de interface no Microsoft Edge, incluindo login, persistência, falhas/retry, ordenação e ciclo completo de convite (autenticação/Firestore simulados).
+- `npm run test:firestore`: emulador oficial com Java 21+, sem produção. Testa migração, transações, isolamento, associação por convite, privacidade, comentários e livros entre duas contas, atualizações em tempo real, conflitos, renovação, expiração, remoção e saída.
 - `npm run build`: gera o bundle estático.
 
 Referências: https://firebase.google.com/docs/firestore/manage-data/transactions e https://firebase.google.com/docs/firestore/security/rules-conditions.

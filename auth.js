@@ -1,3 +1,4 @@
+import { createSharedStore } from './shared.js';
 import { getFirestore } from 'firebase/firestore';
 import { createCloudStore } from './cloud.js';
 export { cloudError } from './cloud.js';
@@ -40,5 +41,6 @@ export function authError(error) {
 
 export function accountStore(uid) {
   if(auth.currentUser?.uid!==uid)throw Error('Entre na conta antes de carregar seus dados.');
-  return createCloudStore(getFirestore(auth.app),uid);
+  const db=getFirestore(auth.app);
+  return createSharedStore(db,uid,createCloudStore(db,uid));
 }

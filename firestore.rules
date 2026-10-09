@@ -2,6 +2,12 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function owns(uid) { return request.auth != null && request.auth.uid == uid; }
+    function signed() { return request.auth != null; }
+    function clubPath(cid) { return /databases/$(database)/documents/bookratsClubs/$(cid); }
+    function member(cid) { return signed() && exists(/databases/$(database)/documents/bookratsClubs/$(cid)/members/$(request.auth.uid)); }
+    function owner(cid) { return signed() && get(clubPath(cid)).data.owner == request.auth.uid; }
+    function touched(cid) { return getAfter(clubPath(cid)).data.updatedAt == request.time
+      && (!exists(clubPath(cid)) || getAfter(clubPath(cid)).data.revision == get(clubPath(cid)).data.revision + 1); }
     match /bookratsAccounts/{uid} {
       allow read: if owns(uid);
       allow create: if owns(uid)
@@ -18,6 +24,13 @@ service cloud.firestore {
         && request.resource.data.revision == resource.data.revision + 1
         && request.resource.data.updatedAt == request.time;
       allow delete: if false;
+      match /clubLinks/{cid} {
+        allow read: if owns(uid);
+        allow create, update: if owns(uid) && request.resource.data.keys().hasOnly(['id'])
+          && request.resource.data.id == cid
+          && existsAfter(/databases/$(database)/documents/bookratsClubs/$(cid)/members/$(uid));
+        allow delete: if false;
+      }
       match /items/{itemId} {
         function commitChanged() {
           let path = /databases/$(database)/documents/bookratsAccounts/$(uid);
@@ -36,6 +49,117 @@ service cloud.firestore {
         allow read: if owns(uid);
         allow create, update: if owns(uid) && commitChanged() && validItem();
         allow delete: if owns(uid) && commitChanged();
+      }
+    }
+
+    match /bookratsInvites/{token} {
+      function validInvite() {
+        return signed() && resource.data.expiresAt > request.time
+          && get(clubPath(resource.data.clubId)).data.inviteToken == token;
+      }
+      allow get: if validInvite();
+      allow list: if false;
+      allow create: if signed() && token.matches('[a-f0-9]{64}')
+        && request.resource.data.keys().hasOnly(['clubId','name','owner','expiresAt'])
+        && request.resource.data.clubId is string && request.resource.data.name is string
+        && request.resource.data.owner == request.auth.uid
+        && owner(request.resource.data.clubId)
+        && getAfter(clubPath(request.resource.data.clubId)).data.inviteToken == token
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt < request.time + duration.value(8,'d');
+      allow update, delete: if false;
+    }
+    match /bookratsClubs/{cid} {
+      function validClub() {
+        let d=request.resource.data;
+        return d.keys().hasOnly(['id','name','description','owner','target','proposals','votes','meetings','comments','revision','inviteToken','updatedAt'])
+          && d.id == cid && cid.matches('[a-zA-Z0-9_-]{1,128}') && d.name is string && d.name.size() > 0 && d.name.size() <= 80
+          && d.description is string && d.description.size() <= 240
+          && d.owner is string && d.target is number && d.target > 0
+          && d.proposals is list && d.votes is map && d.meetings is list && d.comments is list
+          && d.inviteToken is string && (d.inviteToken == '' || d.inviteToken.matches('[a-f0-9]{64}'))
+          && d.revision is int && d.updatedAt == request.time;
+      }
+      function appendOwn(oldList,newList) {
+        return newList == oldList || (newList.size()==oldList.size()+1
+          && newList == oldList.concat([newList[newList.size()-1]])
+          && newList[newList.size()-1].userId==request.auth.uid);
+      }
+      function meetingsAllowed() {
+        let old=resource.data.meetings;
+        let next=request.resource.data.meetings;
+        return appendOwn(old,next) || (old.size()==next.size()+1 && old.hasAll(next)
+          && old.removeAll(next).size()==1 && old.removeAll(next)[0].userId==request.auth.uid);
+      }
+      function memberChanges() {
+        let old=resource.data;let next=request.resource.data;
+        return next.diff(old).affectedKeys().hasOnly(['revision','updatedAt','proposals','votes','meetings','comments'])
+          && (next.proposals==old.proposals || (next.proposals.size()==old.proposals.size()+1 && next.proposals.hasAll(old.proposals)))
+          && next.votes.diff(old.votes).affectedKeys().hasOnly([request.auth.uid])
+          && appendOwn(old.comments,next.comments) && meetingsAllowed();
+      }
+      allow get: if member(cid) || (signed() && !exists(clubPath(cid)));
+      allow list: if false;
+      allow create: if signed() && validClub() && request.resource.data.owner==request.auth.uid
+        && request.resource.data.revision==1 && request.resource.data.inviteToken==''
+        && existsAfter(/databases/$(database)/documents/bookratsClubs/$(cid)/members/$(request.auth.uid));
+      allow update: if signed() && validClub() && request.resource.data.owner==resource.data.owner
+        && request.resource.data.revision==resource.data.revision+1
+        && (owner(cid) || (member(cid) && memberChanges())
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['revision','updatedAt'])
+            && existsAfter(/databases/$(database)/documents/bookratsClubs/$(cid)/members/$(request.auth.uid))));
+      allow delete: if false;
+      match /members/{uid} {
+        function validMember() {
+          let d=request.resource.data;
+          return d.keys().hasOnly(['userId','profile','joinedAt','inviteToken'])
+            && d.userId==uid && d.profile is map && d.profile.id==uid
+            && d.profile.name is string && d.profile.name.size()<=80
+            && d.profile.photo is string && d.profile.color is string && d.profile.goal is int && d.profile.goal>=1 && d.profile.goal<=7;
+        }
+        function invited() {
+          let invite=get(/databases/$(database)/documents/bookratsInvites/$(request.resource.data.inviteToken)).data;
+          return invite.clubId==cid && invite.expiresAt>request.time
+            && getAfter(clubPath(cid)).data.inviteToken==request.resource.data.inviteToken;
+        }
+        allow get: if owns(uid) || member(cid);
+        allow list: if member(cid);
+        allow create: if owns(uid) && validMember() && touched(cid) && request.resource.data.joinedAt==request.time
+          && (getAfter(clubPath(cid)).data.owner==uid || invited());
+        allow update: if owns(uid) && member(cid) && validMember() && touched(cid)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['profile']);
+        allow delete: if signed() && get(clubPath(cid)).data.owner!=uid && touched(cid)
+          && (owns(uid) || (owner(cid) && getAfter(clubPath(cid)).data.inviteToken==''));
+      }
+      match /readings/{rid} {
+        function ownReading() {
+          let d=request.resource.data;
+          return d.keys().hasOnly(['userId','reading','book']) && d.userId==request.auth.uid
+            && d.reading.userId==request.auth.uid && d.reading.id==rid
+            && rid.matches('[a-zA-Z0-9_-]{1,128}') && d.reading.clubs==[cid]
+            && d.reading.page is int && d.reading.page>=0 && d.reading.logs is list
+            && d.reading.status in ['wanted','reading','paused','done']
+            && d.book.id==d.reading.bookId && d.book.id is string && d.book.id.matches('[a-zA-Z0-9_-]{1,128}')
+            && d.book.title is string && d.book.author is string && d.book.cover is string
+            && d.book.pages is int && d.book.pages>0 && d.reading.page<=d.book.pages;
+        }
+        allow read: if member(cid);
+        allow create: if signed() && existsAfter(/databases/$(database)/documents/bookratsClubs/$(cid)/members/$(request.auth.uid)) && ownReading() && touched(cid);
+        allow update: if member(cid) && resource.data.userId==request.auth.uid && ownReading() && touched(cid);
+        allow delete: if member(cid) && (resource.data.userId==request.auth.uid || owner(cid)) && touched(cid);
+      }
+      match /activities/{aid} {
+        function ownActivity() { return request.resource.data.userId==request.auth.uid && request.resource.data.id==aid && request.resource.data.clubs==[cid]; }
+        function reactionOnly() {
+          let next=request.resource.data;let old=resource.data;
+          return next.diff(old).affectedKeys().hasOnly(['likes'])
+            && next.likes is list && next.likes.toSet().size()==next.likes.size()
+            && next.likes.removeAll([request.auth.uid])==old.likes.removeAll([request.auth.uid]);
+        }
+        allow read: if member(cid);
+        allow create: if signed() && existsAfter(/databases/$(database)/documents/bookratsClubs/$(cid)/members/$(request.auth.uid)) && ownActivity() && touched(cid);
+        allow update: if member(cid) && touched(cid) && (reactionOnly() || (resource.data.userId==request.auth.uid && ownActivity() && request.resource.data.likes==resource.data.likes));
+        allow delete: if member(cid) && (resource.data.userId==request.auth.uid || owner(cid)) && touched(cid);
       }
     }
   }
