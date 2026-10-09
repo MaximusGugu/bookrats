@@ -89,3 +89,4 @@ dialog .close{min-width:40px;min-height:40px}
 @media(prefers-reduced-motion:reduce){button,a,.cover{transition:none}}
 .brand-footer{min-height:78px;padding:20px 18px 24px}.footer-logo{width:112px}
 @media(max-width:539px){.meeting-open{align-items:flex-start;flex-direction:column}.meeting-attendees{justify-content:flex-start;min-width:0}.meeting-attendees small{text-align:left}.meeting-delete{align-self:flex-start;margin-top:10px}}
+@media(max-width:650px){input,select,textarea{font-size:16px}}

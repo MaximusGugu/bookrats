@@ -26,6 +26,9 @@ const assert = require('node:assert/strict');
     });
 
     assert.equal(await page.locator('.sync-bar').count(),0,'sync controls removed');
+    await page.evaluate(()=>addBook());
+    assert.equal(await page.locator('input[name=title]').evaluate(el=>getComputedStyle(el).fontSize),'16px','mobile text fields avoid iOS focus zoom');
+    await page.locator('[data-action=close]').first().click();
     assert.match(await page.locator('[data-action=log-picker] svg path').first().getAttribute('d'),/^M7 4\.5/,'bookmark icon');
     await page.getByRole('button',{name:'Abrir menu'}).click();
     await page.locator('.menu-profile').click();
