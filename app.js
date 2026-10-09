@@ -102,6 +102,9 @@ function themeButton() {
   const dark = document.documentElement.dataset.theme === 'dark';
   return `<button class="icon-button" data-action="theme" aria-label="Modo escuro" aria-pressed="${dark}" title="${dark?'Ativar modo claro':'Ativar modo escuro'}">${icon(dark?'Sun':'Moon')}</button>`;
 }
+function brandFooter() {
+  return `<footer class="brand-footer" aria-label="Bookrats"><img class="footer-logo footer-logo-light" src="brand/logo-escuro.png" alt="Bookrats"><img class="footer-logo footer-logo-dark" src="brand/logo-claro.png" alt="Bookrats"></footer>`;
+}
 function toggleTheme() {
   const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
   document.documentElement.dataset.theme = theme;
@@ -151,11 +154,12 @@ function clubPanel(c) {
 function render(){
   if (!sessionUser) return renderLogin();
   if(!state)return renderCloudLoading();
+  document.querySelector('meta[name="theme-color"]').content = document.documentElement.dataset.theme==='dark'?'#171d1a':'#fafbf9';
   const filtersOpen = $('.shelf-filters')?.open;
   if(!club())state.activeClub=memberships()[0]?.id||'';
   const c=club();
   const title=view==='clube'&&c?c.name:'bookrats';
-  $('#app').innerHTML=`<div class="shell"><main class="main"><header class="topbar"><${view==='clube'&&c?'h1':'a href="#clube"'} class="topbar-title">${esc(title)}</${view==='clube'&&c?'h1':'a'}><div class="topbar-actions">${themeButton()}<button class="icon-button" data-action="app-menu" aria-label="Abrir menu" aria-haspopup="dialog" title="Menu">${icon('Menu')}</button></div></header><div class="content">${view==='estante'?library():view==='clubes'?clubsPage():view==='perfil'?profilePage():view==='atividade'?`<div class="heading"><h1>Entre uma página e outra</h1></div><div class="feed">${feed()}</div>`:c?clubPage(c):clubsPage()}<div class="sync-bar"><span id="syncStatus" role="status">${esc(syncMessage)}</span><button class="small" data-action="refresh-cloud">Atualizar</button></div></div></main></div>`;
+  $('#app').innerHTML=`<div class="shell"><main class="main"><header class="topbar"><${view==='clube'&&c?'h1':'a href="#clube"'} class="topbar-title">${esc(title)}</${view==='clube'&&c?'h1':'a'}><div class="topbar-actions">${themeButton()}<button class="icon-button" data-action="app-menu" aria-label="Abrir menu" aria-haspopup="dialog" title="Menu">${icon('Menu')}</button></div></header><div class="content">${view==='estante'?library():view==='clubes'?clubsPage():view==='perfil'?profilePage():view==='atividade'?`<div class="heading"><h1>Entre uma página e outra</h1></div><div class="feed">${feed()}</div>`:c?clubPage(c):clubsPage()}<div class="sync-bar"><span id="syncStatus" role="status">${esc(syncMessage)}</span><button class="small" data-action="refresh-cloud">Atualizar</button></div></div>${brandFooter()}</main></div>`;
   document.querySelectorAll('img').forEach(img=>img.addEventListener('error',()=>{img.src=fallback;},{once:true}));
   if(filtersOpen && $('.shelf-filters')) $('.shelf-filters').open = true;
 }
@@ -396,8 +400,13 @@ document.addEventListener('keydown',e=>{
 render();
 initializeLogin();
 
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+}
+
 function renderLogin() {
-  $('#app').innerHTML = '<main class="login-page"><section class="login-card"><h1>bookrats</h1><p>Mais um capítulo, em boa companhia.</p><button class="primary" data-action="google-login" '+(authBusy?'disabled':'')+'>Entrar com Google</button><p role="status">'+esc(authMessage)+'</p><small>'+ (pendingInvite?'Entre com Google para ver e aceitar o convite do clube.':'Acesse seus livros com sua conta Google.') +'</small></section></main>';
+  document.querySelector('meta[name="theme-color"]').content = '#194b3a';
+  $('#app').innerHTML = '<main class="login-page"><section class="login-card"><h1 class="sr-only">Bookrats</h1><img class="login-logo" src="brand/logo-branco.png" alt="Bookrats"><p>Mais um capítulo, em boa companhia.</p><button class="primary" data-action="google-login" '+(authBusy?'disabled':'')+'>Entrar com Google</button><p role="status">'+esc(authMessage)+'</p><small>'+ (pendingInvite?'Entre com Google para ver e aceitar o convite do clube.':'Acesse seus livros com sua conta Google.') +'</small></section></main>';
 }
 async function initializeLogin() {
   if(authBusy)return;
@@ -440,7 +449,8 @@ async function googleLogout() {
 }
 
 function renderCloudLoading(){
-  $('#app').innerHTML='<main class="login-page"><section class="login-card"><h1>bookrats</h1><p role="status">'+esc(dataMessage)+'</p>'+(!dataLoading?'<button class="primary" data-action="retry-cloud">Tentar carregar novamente</button>':'')+'<button data-action="sign-out">Sair da conta</button></section></main>';
+  document.querySelector('meta[name="theme-color"]').content = '#194b3a';
+  $('#app').innerHTML='<main class="login-page"><section class="login-card"><h1 class="sr-only">Bookrats</h1><img class="login-logo" src="brand/logo-branco.png" alt="Bookrats"><p role="status">'+esc(dataMessage)+'</p>'+(!dataLoading?'<button class="primary" data-action="retry-cloud">Tentar carregar novamente</button>':'')+'<button data-action="sign-out">Sair da conta</button></section></main>';
 }
 
 function restoreState(previous){

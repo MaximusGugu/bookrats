@@ -27,3 +27,5 @@
 [data-theme="dark"] .topbar{background:transparent}
 [data-theme="dark"] dialog::backdrop{background:#050907b3}
 [data-theme="dark"] #toast{background:#d2e1c6;color:#1c2b20}
+[data-theme="dark"] .footer-logo-light{display:none}
+[data-theme="dark"] .footer-logo-dark{display:block}
